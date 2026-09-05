@@ -1,0 +1,155 @@
+'use strict'
+
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+
+const core = require('../src/kb-core')
+
+function tmpRoot() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-kb-test-'))
+}
+
+function fakeReq(text) {
+  const chunk = Buffer.from(text, 'utf8')
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield chunk
+    },
+  }
+}
+
+test('bootstrap 创建骨架且幂等、不覆盖已有文件', () => {
+  const root = tmpRoot()
+  const created = core.bootstrap(root)
+  assert.ok(created.includes('raw/'))
+  assert.ok(created.includes('index.md'))
+  for (const rel of core.BOOT_DIRS) assert.ok(fs.statSync(path.join(root, rel)).isDirectory(), rel)
+  for (const name of core.BOOT_FILES) assert.ok(fs.existsSync(path.join(root, name)), name)
+  // 二次自举：不再新建、不覆盖内容
+  fs.writeFileSync(path.join(root, 'index.md'), '# 已有目录\n', 'utf8')
+  const again = core.bootstrap(root)
+  assert.equal(again.length, 0)
+  assert.equal(fs.readFileSync(path.join(root, 'index.md'), 'utf8'), '# 已有目录\n')
+})
+
+test('resolveExisting 拒绝词法越界 / 绝对路径 / 软链逃逸', () => {
+  const root = tmpRoot()
+  core.bootstrap(root)
+  fs.writeFileSync(path.join(root, 'a.md'), 'hi', 'utf8')
+  assert.throws(() => core.resolveExisting(root, '../outside'), /越界/)
+  assert.throws(() => core.resolveExisting(root, '/etc/passwd'), /绝对路径/)
+  assert.throws(() => core.resolveExisting(root, 'a\0b'), /非法路径/)
+  // 软链指向 root 外
+  const outside = path.join(path.dirname(root), path.basename(root) + '-outside.md')
+  fs.writeFileSync(outside, 'secret', 'utf8')
+  try {
+    fs.symlinkSync(outside, path.join(root, 'leak.md'))
+    assert.throws(() => core.resolveExisting(root, 'leak.md'), /符号链接越界/)
+  } finally {
+    fs.rmSync(outside, { force: true })
+  }
+  // 正常相对路径可解析
+  assert.equal(core.resolveExisting(root, 'a.md'), path.join(root, 'a.md'))
+})
+
+test('parseFrontmatter 支持 tags 数组与引号值', () => {
+  const { data, body } = core.parseFrontmatter('---\ntitle: "现场处置: 证书过期"\ntags: [网络, 重启]\nauthor: zhang\n---\n\n正文第一行\n')
+  assert.equal(data.title, '现场处置: 证书过期')
+  assert.deepEqual(data.tags, ['网络', '重启'])
+  assert.equal(data.author, 'zhang')
+  assert.match(body, /^正文第一行/)
+  assert.equal(core.parseFrontmatter('无 frontmatter').data, null)
+})
+
+test('readDoc 解析 md 文档并带 frontmatter', () => {
+  const root = tmpRoot()
+  core.bootstrap(root)
+  const rel = 'wiki/howtos/cert-renew.md'
+  fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
+  fs.writeFileSync(path.join(root, rel), '---\ntitle: 证书续期\ntags: [tls]\n---\n\n步骤一\n', 'utf8')
+  const doc = core.readDoc(root, rel)
+  assert.equal(doc.kind, 'md')
+  assert.equal(doc.frontmatter.title, '证书续期')
+  assert.equal(doc.rel, rel)
+  assert.match(doc.body, /步骤一/)
+  // 二进制文件给 binary
+  fs.writeFileSync(path.join(root, 'raw/dump.bin'), Buffer.from([0, 1, 2, 3]))
+  assert.equal(core.readDoc(root, 'raw/dump.bin').kind, 'binary')
+})
+
+test('search 全文扫描：分组命中、大小写不敏感', () => {
+  const root = tmpRoot()
+  core.bootstrap(root)
+  fs.writeFileSync(path.join(root, 'wiki/howtos/restart.md'), '---\ntitle: 重启\n---\n\n先停 nginx\n再启 nginx\n', 'utf8')
+  fs.writeFileSync(path.join(root, 'raw/server.log'), 'NGINX failed to start\nother line\n', 'utf8')
+  const r = core.search(root, 'nginx')
+  assert.ok(r.hits.length >= 2)
+  const byRel = new Map(r.hits.map((h) => [h.rel, h]))
+  assert.ok(byRel.get('wiki/howtos/restart.md').lines.length === 2)
+  assert.ok(byRel.get('raw/server.log').lines[0].text.includes('NGINX failed'))
+  assert.ok(r.durationMs >= 0)
+  assert.throws(() => core.search(root, '   '), /缺少搜索词/)
+})
+
+test('uploadRaw 只准进 raw/、拒绝覆盖、支持 raw 子目录自动创建', async () => {
+  const root = tmpRoot()
+  core.bootstrap(root)
+  // 拒绝 wiki
+  await assert.rejects(() => core.uploadRaw(fakeReq('x'), root, 'wiki', 'a.md'), /只允许上传到 raw/)
+  await assert.rejects(() => core.uploadRaw(fakeReq('x'), root, 'raw-evil', 'a.md'), /只允许上传到 raw/)
+  // raw 根
+  const r1 = await core.uploadRaw(fakeReq('hello'), root, 'raw', 'a.log')
+  assert.equal(r1.name, 'a.log')
+  assert.equal(fs.readFileSync(path.join(root, 'raw/a.log'), 'utf8'), 'hello')
+  // 拒绝覆盖
+  await assert.rejects(() => core.uploadRaw(fakeReq('y'), root, 'raw', 'a.log'), /同名文件已存在/)
+  // raw 子目录自动创建
+  const r2 = await core.uploadRaw(fakeReq('z'), root, 'raw/2026-09', 'b.log')
+  assert.equal(r2.dir, 'raw/2026-09')
+  assert.equal(fs.readFileSync(path.join(root, 'raw/2026-09/b.log'), 'utf8'), 'z')
+  // 路径部分被 basename 清洗（与 file-share 同语义）,'../evil' 落为 'evil'
+  const r3 = await core.uploadRaw(fakeReq('z'), root, 'raw', '../evil')
+  assert.equal(r3.name, 'evil')
+  assert.ok(fs.existsSync(path.join(root, 'raw/evil')))
+})
+
+test('listDir 目录在前、中文排序', () => {
+  const root = tmpRoot()
+  core.bootstrap(root)
+  fs.writeFileSync(path.join(root, 'b.md'), 'x', 'utf8')
+  fs.writeFileSync(path.join(root, '阿.md'), 'x', 'utf8')
+  const entries = core.listDir(root, '')
+  const names = entries.map((e) => e.name)
+  const dirIdx = names.indexOf('raw')
+  const bIdx = names.indexOf('b.md')
+  const cIdx = names.indexOf('阿.md')
+  assert.ok(dirIdx >= 0 && dirIdx < bIdx, '目录排在文件前')
+  assert.ok(cIdx >= 0, '中文名可见')
+})
+
+test('statusPayload 返回根目录与计数', () => {
+  const root = tmpRoot()
+  core.bootstrap(root)
+  fs.writeFileSync(path.join(root, 'raw/x.log'), 'x', 'utf8')
+  const s = core.statusPayload(root)
+  assert.equal(s.ok, true)
+  assert.equal(s.root, path.resolve(root))
+  assert.equal(s.counts.raw, 1)
+  assert.ok(s.counts.wiki >= 0)
+})
+
+test('defaultRoot 遵循 DSH_KB_ROOT 覆盖', () => {
+  const old = process.env.DSH_KB_ROOT
+  try {
+    process.env.DSH_KB_ROOT = '/tmp/kb-override'
+    assert.equal(core.defaultRoot(), '/tmp/kb-override')
+    delete process.env.DSH_KB_ROOT
+    assert.equal(core.defaultRoot(), path.join(os.homedir(), '.dsh', 'kb'))
+  } finally {
+    if (old === undefined) delete process.env.DSH_KB_ROOT
+    else process.env.DSH_KB_ROOT = old
+  }
+})

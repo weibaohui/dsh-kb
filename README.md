@@ -1,0 +1,60 @@
+# @weibaohui/dsh-kb
+
+[![DSH plugin](https://img.shields.io/badge/dsh-plugin-green)](https://github.com/topics/dsh-plugin)
+[![npm version](https://img.shields.io/npm/v/@weibaohui/dsh-kb)](https://www.npmjs.com/package/@weibaohui/dsh-kb)
+
+**dsh 插件 · 团队知识库**：离线知识共享（FDE 盒子场景）。侧栏入口进全页知识库——目录树浏览、全文搜索、markdown 阅读、raw 素材上传、任意条目 `@` 给 agent。**写路径收口在 agent**（配套 skill），插件本体只读为主。
+
+基于 Karpathy LLM Wiki 模式：raw（不可变素材）→ wiki（成文知识）→ schema（约定），人丢素材、agent 两步加工（分析 → 成文）维护 index 与 log。
+
+![demo](docs/demo-kb.gif)
+
+## 核心功能
+
+- **全页知识库**：侧栏底部「📚 知识库」进入；左栏目录树（wiki / raw 懒加载），右栏阅读或搜索
+- **全文搜索**：内置零依赖扫描（大小写不敏感，文本类文件，命中高亮），无需安装任何外部工具
+- **markdown 阅读**：frontmatter 徽章（标题/作者/标签/更新时间）、`[[wikilink]]`、内部链接、图片内联、代码块、表格
+- **素材上传**：raw/ 区可上传（log/截图/抓包…），服务端强制只进 raw/、拒绝覆盖（raw 不可变）
+- **@ 给 agent**：任意条目一键把 `@绝对路径` 注入输入框，让 agent 阅读或加工
+- **骨架自举**：首次启动自动创建目录与约定文件（不覆盖已有），零配置
+
+## 知识库布局
+
+```
+~/.dsh/kb/                # DSH_KB_ROOT 可覆盖（如 /var/lib/dsh/kb）
+├── raw/                  # 原始素材，不可变（人上传，agent 只读）
+├── wiki/
+│   ├── howtos/           # 症状 → 原因 → 步骤 → 验证
+│   ├── decisions/        # 背景 → 选项 → 结论 → 后果
+│   └── postmortems/      # 时间线 → 根因 → 改进项
+├── index.md              # 目录（agent 维护，每篇成文必须挂入）
+├── log.md                # 操作流水（谁、何时、动了哪些篇）
+└── schema.md             # agent 规则（页面规范 / 两步加工 / 矛盾标注）
+```
+
+## 安装
+
+```bash
+dsh plugin --profile web add @weibaohui/dsh-kb -w
+```
+
+装完重启 `dsh web` 即生效。
+
+### 配套 agent 技能（必须装，否则 agent 不会加工沉淀）
+
+把 `skill/dsh-kb/` 安装进技能市场（skills-management），agent 即获得查询/两步加工/矛盾标注/log 纪律。另见 `docs/lint-prompt.md`：在 dsh-tasks 加一条每月 lint 定时项（死链/孤儿页/陈旧条目清单）。
+
+## 使用
+
+1. 侧栏点「📚 知识库」；顶部搜索框全文检索（Enter），左侧树点开浏览
+2. 点文件名阅读；`[[链接]]` 与内部链接可点击跳转；点「@ 给 agent」把条目丢进对话框
+3. 往 raw/ 传素材：raw 树内打开任意页面，右上「上传素材」
+4. 加工沉淀：`@raw/xxx.log` 给 agent，说「按 schema 加工入库」——agent 两步加工后成文、挂 index、记 log
+
+## 与 dsh-file-share 的分界
+
+file-share 管**会话工作区**的文件（跟着会话 cwd 走）；dsh-kb 管**跨会话、跨人的固定知识库**（只读为主 + raw 上传 + 搜索）。二者互不依赖。
+
+## 联系我 :飞书群
+
+![link](https://foruda.gitee.com/images/1774880015525784725/4fd67005_77493.png "link")

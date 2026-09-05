@@ -1,0 +1,13 @@
+# @weibaohui/dsh-kb bundle patch: contributes the plugin row into the
+# host composition when this package is installed via `dsh plugin add`.
+#
+# The plugin is HOST-PLANE: it reads the host webServer to serve same-origin
+# routes under /dsh-kb/api (status/tree/doc/file/search/upload) rooted at a
+# fixed KB directory (DSH_KB_ROOT, default ~/.dsh/kb). Read-mostly: the only
+# write path is upload into raw/ (immutable source drop). wiki edits stay with
+# the agent via the dsh-kb skill. It must land in the host composition (this
+# insert), never inside an agent preset.
+
+- insert:
+    - id: dsh-kb
+      name: '@weibaohui/dsh-kb'
