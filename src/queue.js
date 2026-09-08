@@ -119,6 +119,18 @@ function extractJsonTail(text) {
   return null
 }
 
+/**
+ * 模型路由覆盖判定（dsh-smart-title 同语义）：provider+model 成对非空才生效；
+ * 只填一个视为配置不完整（null），全空为未配置（null）。调用方拿到 null 时回退
+ * 宿主 agentDefaultModel。
+ */
+function resolveRouteOverride(provider, model) {
+  const p = typeof provider === 'string' ? provider.trim() : ''
+  const m = typeof model === 'string' ? model.trim() : ''
+  if (p && m) return { provider: p, model: m }
+  return null
+}
+
 /** 蒸馏 prompt（自包含，不依赖会话上下文；规则与 schema.md 一致）。 */
 function buildDistillPrompt(item) {
   const head = item.chunk
@@ -568,5 +580,6 @@ function createQueue({ root, ledgerFile, runner, logger = { info() {}, warn() {}
 module.exports = {
   createQueue, ExecutorUnavailableError, buildDistillPrompt, extractJsonTail,
   fingerprint, wikiSnapshot, diffWiki, collectWikiSources, splitMarkdown,
+  resolveRouteOverride,
   RETRY_BASE_MS, DONE_KEEP, CHUNK_THRESHOLD, CHUNK_TARGET,
 }

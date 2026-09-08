@@ -71,6 +71,16 @@ function makeQueue(opts) {
   return queueCore.createQueue({ logger: { info() {}, warn() {}, error() {} }, ...opts })
 }
 
+test('resolveRouteOverride：成对生效、缺一或全空回退默认', () => {
+  assert.deepStrictEqual(queueCore.resolveRouteOverride('deepseek', 'deepseek-chat'), { provider: 'deepseek', model: 'deepseek-chat' })
+  assert.deepStrictEqual(queueCore.resolveRouteOverride(' deepseek ', ' deepseek-chat '), { provider: 'deepseek', model: 'deepseek-chat' }, 'trim 后生效')
+  assert.strictEqual(queueCore.resolveRouteOverride('deepseek', ''), null, '只填 provider 不生效')
+  assert.strictEqual(queueCore.resolveRouteOverride('', 'deepseek-chat'), null, '只填 model 不生效')
+  assert.strictEqual(queueCore.resolveRouteOverride('', ''), null, '全空回退默认')
+  assert.strictEqual(queueCore.resolveRouteOverride(undefined, undefined), null)
+  assert.strictEqual(queueCore.resolveRouteOverride('  ', '  '), null, '纯空白视同未配置')
+})
+
 test('extractJsonTail：取最后一个含 pages 的 JSON 行，忽略前后噪声', () => {
   const text = ['分析中…', '{"other": 1}', '结论如下：', '{"pages": ["wiki/howtos/a.md"], "summary": "好了"}', ''].join('\n')
   const r = queueCore.extractJsonTail(text)

@@ -33,7 +33,7 @@ const inject = ['webServer', 'agents', 'agentDefaultModel', 'sessions', 'setting
 const API_PREFIX = '/dsh-kb/api'
 
 const AUTO_NS = 'dsh-kb-autodistill'
-const DEFAULT_AUTO = { enabled: true, model: '', timeoutMin: 20, maxAttempts: 2, sweepSec: 60 }
+const DEFAULT_AUTO = { enabled: true, provider: '', model: '', timeoutMin: 20, maxAttempts: 2, sweepSec: 60 }
 
 /** dsh 数据根（与宿主一致：$DSH_HOME，缺省 ~/.dsh）。 */
 function dshHome() {
@@ -58,6 +58,7 @@ function autoSettingsSchema() {
   if (!Schema) return null
   return Schema.object({
     enabled: Schema.boolean(),
+    provider: Schema.string(),
     model: Schema.string(),
     timeoutMin: Schema.number(),
     maxAttempts: Schema.number(),
@@ -111,15 +112,9 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
       throw new queueCore.ExecutorUnavailableError('agents/agentDefaultModel 服务不可用')
     }
     const cfg = readAuto()
-    let selection
-    const modelSpec = String(cfg.model || '').trim()
-    const slash = modelSpec.indexOf('/')
-    if (modelSpec && slash > 0 && slash < modelSpec.length - 1) {
-      selection = { provider: modelSpec.slice(0, slash), model: modelSpec.slice(slash + 1) }
-    } else {
-      if (modelSpec) logger.warn(`dsh-kb: autoDistill.model 需为 provider/model 格式，忽略当前值「${modelSpec}」`)
-      selection = adm.currentSelection()
-    }
+    // 路由：设置里 provider+model 成对配置则覆盖（dsh-smart-title 同语义），否则跟随宿主默认
+    let selection = queueCore.resolveRouteOverride(cfg.provider, cfg.model)
+    if (!selection) selection = adm.currentSelection()
     if (!selection || !selection.provider || !selection.model) {
       throw new queueCore.ExecutorUnavailableError('模型未配置（agentDefaultModel 为空）')
     }
@@ -361,8 +356,17 @@ module.exports = {
               }
               // ── 自动蒸馏队列 ──
               if (req.method === 'GET' && rest === '/queue') {
+                const cfg = readAuto()
+                const override = queueCore.resolveRouteOverride(cfg.provider, cfg.model)
+                let route = override
+                if (!route) {
+                  try { route = ctx.agentDefaultModel && ctx.agentDefaultModel.currentSelection() } catch { route = null }
+                }
+                route = route && route.provider && route.model
+                  ? { provider: route.provider, model: route.model, source: override ? 'override' : 'default' }
+                  : null
                 const snap = queue.snapshot()
-                sendJson(res, 200, { ok: true, enabled: readAuto().enabled, ledger: ledgerFile, ...snap })
+                sendJson(res, 200, { ok: true, enabled: cfg.enabled, route, ledger: ledgerFile, ...snap })
                 return
               }
               if (req.method === 'POST' && rest === '/queue/pause') {

@@ -107,6 +107,8 @@ input.kb-file{display:none}
 .kb-q-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}
 .kb-q-stats{display:flex;gap:6px;flex-wrap:wrap;flex:1;min-width:0}
 .kb-q-banner{font-size:12px;line-height:1.6;border:1px solid color-mix(in srgb,var(--dsw-alias-label-primary) 24%,var(--dsw-alias-border-l2));border-radius:8px;padding:8px 12px;margin:0 0 12px;color:var(--dsw-alias-label-secondary)}
+.kb-q-model{font-size:12px;color:var(--dsw-alias-label-secondary);margin:0 0 12px}
+.kb-q-model-hint{color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));margin-left:4px}
 .kb-q-row{display:flex;align-items:flex-start;gap:10px;padding:9px 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:9px;margin:0 0 8px}
 .kb-q-main{flex:1;min-width:0}
 .kb-q-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -529,6 +531,10 @@ function QueueView(props) {
     ),
     (data.executorDown || data.lastError) && h('div', { className: 'kb-q-banner' },
       `⚠️ 执行器不可用：${data.lastError || '稍后自动重试'}（排队条目会保留，配置好模型后自动继续）`),
+    data.route ? h('div', { className: 'kb-q-model' },
+      `⚙️ 蒸馏模型：${data.route.provider}/${data.route.model}`,
+      data.route.source === 'default' ? h('span', { className: 'kb-q-model-hint' }, '（跟随宿主默认，设置 → dsh-kb-autodistill 可指定）') : h('span', { className: 'kb-q-model-hint' }, '（设置中指定）'),
+    ) : null,
     data.enabled === false && h('div', { className: 'kb-q-banner' },
       '自动蒸馏已在设置中停用：素材仍会入队留档，但不会执行；可手动 @ 给 agent 加工。'),
     !items.length && h('div', { className: 'kb-empty' }, '队列为空：往 raw/ 上传素材后会自动入队蒸馏。'),
