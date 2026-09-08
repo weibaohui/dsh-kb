@@ -648,14 +648,14 @@ window.__ModuleLoader__.load({
       return root
     }
 
-    /** 知识库目录选择浮层：raw/ + wiki/ 懒加载目录树，点目录名即选。 */
+    /** 知识库目录选择浮层：目录=锚定上下文，文件=@引用；整行可点，caret 展开。 */
     function KbDirPicker(props) {
       const h = React.createElement
       const { root, anchor, onPick, onClose } = props
       const [rows, setRows] = React.useState(() => ([
-        { rel: '', name: '📚 整个知识库', depth: 0, expandable: false },
-        { rel: 'raw', name: 'raw · 原始素材', depth: 0, expandable: true },
-        { rel: 'wiki', name: 'wiki · 成文知识', depth: 0, expandable: true },
+        { rel: '', name: '📚 整个知识库', depth: 0, kind: 'root' },
+        { rel: 'raw', name: 'raw · 原始素材', depth: 0, kind: 'dir', expandable: true },
+        { rel: 'wiki', name: 'wiki · 成文知识', depth: 0, kind: 'dir', expandable: true },
       ]))
       const [expanded, setExpanded] = React.useState({})
       const [err, setErr] = React.useState(null)
@@ -664,21 +664,15 @@ window.__ModuleLoader__.load({
         fetch(`${API}/tree?path=${encodeURIComponent(rel)}`)
           .then(readJson)
           .then((d) => {
-            const dirs = (d.entries || []).filter((e) => e.type === 'dir').map((e) => ({
-              rel: rel + '/' + e.name, name: e.name, depth: rel.split('/').length, expandable: true,
+            const depth = rel.split('/').length
+            const kids = (d.entries || []).map((e) => ({
+              rel: rel + '/' + e.name, name: e.name, depth,
+              kind: e.type === 'dir' ? 'dir' : 'file', expandable: e.type === 'dir',
             }))
             setRows((rs) => {
-              const out = []
-              let inserting = false
-              for (const r of rs) {
-                if (r.rel === rel) { out.push(r); inserting = true; continue }
-                const depth = r.rel.split('/').length
-                if (inserting && depth <= rel.split('/').length) inserting = false
-                if (!inserting) out.push(r)
-              }
-              // 插到父行之后（按深度截断已展开的旧子树不存在——每节点只加载一次）
-              const idx = out.findIndex((r) => r.rel === rel)
-              return idx >= 0 ? [...out.slice(0, idx + 1), ...dirs, ...out.slice(idx + 1)] : rs
+              const idx = rs.findIndex((r) => r.rel === rel)
+              if (idx < 0) return rs
+              return [...rs.slice(0, idx + 1), ...kids, ...rs.slice(idx + 1)]
             })
           })
           .catch((e) => setErr(String((e && e.message) || e)))
@@ -690,29 +684,52 @@ window.__ModuleLoader__.load({
         loadKids(row.rel)
       }
 
-      const rowsView = rows.map((r) => h('div', { className: 'kbc-row', key: r.rel || 'root', style: { paddingLeft: 8 + r.depth * 14 } },
+      const rowsView = rows.map((r) => h('div', {
+        className: 'kbc-row', key: r.rel || 'root', style: { paddingLeft: 8 + r.depth * 14 },
+        onClick: () => onPick({ abs: r.rel ? root.replace(/\/+$/, '') + '/' + r.rel : root.replace(/\/+$/, ''), kind: r.kind }),
+      },
         r.expandable
-          ? h('button', { className: 'caret', onClick: () => toggle(r), 'aria-label': '展开' }, expanded[r.rel] ? '▾' : '▸')
+          ? h('button', { className: 'caret', 'aria-label': '展开', onClick: (e) => { e.stopPropagation(); toggle(r) } }, expanded[r.rel] ? '▾' : '▸')
           : h('span', { className: 'caret' }),
-        h('span', { className: 'nm', onClick: () => onPick(root, r.rel) }, r.name),
+        h('span', { className: 'nm' }, (r.kind === 'file' ? '📄 ' : '') + r.name),
       ))
 
-      const style = (() => {
-        const winW = typeof window !== 'undefined' ? window.innerWidth : 1280
-        const winH = typeof window !== 'undefined' ? window.innerHeight : 800
-        const width = 320
-        return {
-          left: Math.max(8, Math.min(anchor.left, winW - width - 8)),
-          // bottom 锚定（experts 同款）：贴着按钮上方，展开时向上生长
-          bottom: Math.max(8, winH - anchor.top + 6),
-          maxHeight: Math.max(180, Math.min(340, anchor.top - 20)),
-        }
-      })()
+      const winW = typeof window !== 'undefined' ? window.innerWidth : 1280
+      const winH = typeof window !== 'undefined' ? window.innerHeight : 800
+      const style = {
+        left: Math.max(8, Math.min(anchor.left, winW - 336)),
+        bottom: Math.max(8, winH - anchor.top + 6),
+        maxHeight: Math.max(180, Math.min(360, anchor.top - 20)),
+      }
       return h('div', { className: 'kbc-pop', style, role: 'dialog' },
-        h('div', { className: 'kbc-pop-h' }, '选择知识库目录 —— 此后这段对话基于该目录推理'),
+        h('div', { className: 'kbc-pop-h' }, '点目录=整目录作为上下文；点文件=@引用该文件'),
         err && h('div', { className: 'kbc-pop-h' }, '加载失败：' + err),
         rowsView,
       )
+    }
+
+    /** composer 直写兜底：宿主事件通道静默失败时直接操作输入区（textarea/contenteditable）。 */
+    function insertTextViaDom(text) {
+      try {
+        const card = document.querySelector('[data-composer-card]')
+        const ta = card && card.querySelector('textarea')
+        const ce = card && (card.querySelector('[contenteditable="true"]') || card.querySelector('[contenteditable=""]'))
+        if (typeof document.execCommand !== 'function' || (!ta && !ce)) return false
+        if (ta) {
+          ta.focus()
+          const len = ta.value ? ta.value.length : 0
+          try { ta.setSelectionRange(len, len) } catch {}
+        } else {
+          ce.focus()
+          const sel = window.getSelection()
+          const range = document.createRange()
+          range.selectNodeContents(ce)
+          range.collapse(false)
+          sel.removeAllRanges()
+          sel.addRange(range)
+        }
+        return document.execCommand('insertText', false, text) === true
+      } catch { return false }
     }
 
     /** composer 工具行按钮（conversation.input.left slot）。 */
@@ -721,6 +738,7 @@ window.__ModuleLoader__.load({
       React.useEffect(ensureKbComposerStyles, [])
       const [picker, setPicker] = React.useState(null)
       const [root, setRoot] = React.useState(null)
+      const [msg, setMsg] = React.useState(null)
       const btnRef = React.useRef(null)
       const liveInput = React.useRef(props.input)
       liveInput.current = props.input
@@ -734,10 +752,14 @@ window.__ModuleLoader__.load({
         setPicker(anchor)
         fetchKbRoot().then((r) => setRoot(r || '/Users/mac/.dsh/kb'))
       }
-      const pick = (kbRoot, rel) => {
-        const dirAbs = rel ? (kbRoot.replace(/\/+$/, '') + '/' + rel) : kbRoot.replace(/\/+$/, '')
-        insertComposerText(composerScope, props.sessionId, liveInput.current, buildGroundingText(dirAbs))
+      const pick = (target) => {
+        const text = target.kind === 'dir' || target.kind === 'root' ? buildGroundingText(target.abs) : `@${target.abs} `
+        let ok = insertComposerText(composerScope, props.sessionId, liveInput.current, text)
+        if (!ok) ok = insertTextViaDom(text) // 宿主事件通道不响应时直写输入区
+        if (ok) setMsg(target.kind === 'dir' || target.kind === 'root' ? '✓ 已锚定知识库目录，继续输入问题' : '✓ 已插入文件引用')
+        else { try { navigator.clipboard.writeText(text) } catch {} setMsg('无法自动插入，已复制到剪贴板') }
         close()
+        setTimeout(() => setMsg(null), 2600)
         try {
           const card = document.querySelector('[data-composer-card]')
           const ta = card && card.querySelector('textarea')
@@ -753,105 +775,8 @@ window.__ModuleLoader__.load({
           onClick: () => (picker === null ? open() : close()),
         }, '📚 知识库'),
         popover,
+        msg ? RDP.createPortal(h('div', { className: 'kbc-pop', style: { position: 'fixed', left: 12, bottom: 12, width: 'auto', maxHeight: 'none', padding: '8px 14px', fontSize: 12.5 } }, msg), document.body) : null,
       )
-    }
-
-    // ── 侧栏导航入口（工艺库下方，dsh-process 同款 DOM 注入）────────────────
-    const KB_ENTRY_ATTR = 'data-dsh-kb-entry'
-
-    function kbSidebarRoot() {
-      const column = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"], .dshDesktopUpstreamSidebar, .dshDesktopSidebarSurface')
-      if (column === null) return undefined
-      const logoOwner = column.querySelector('[class*="logoRow"]') && column.querySelector('[class*="logoRow"]').parentElement
-      return logoOwner || (column.firstElementChild || undefined)
-    }
-
-    function kbNewSessionButton(root) {
-      const nested = root.querySelector('button[class*="newSession"]')
-      if (nested) return nested
-      for (const child of root.children) {
-        if (child instanceof HTMLButtonElement && !child.matches('[' + KB_ENTRY_ATTR + ']')) return child
-      }
-      const buttons = Array.from(root.querySelectorAll('button'))
-      return buttons.find((b) => !b.matches('[' + KB_ENTRY_ATTR + ']') && /新会话|新建会话|new session/i.test(b.textContent || ''))
-    }
-
-    /** 放置：排在插件入口家族（工艺库等）之后；家族为空则贴新会话按钮。 */
-    function placeKbEntry(root, entry) {
-      const button = kbNewSessionButton(root)
-      if (!button) return false
-      if (entry.parentElement !== root) {
-        const family = Array.from(root.children).filter((el) => el instanceof HTMLElement
-          && el.matches('[data-dsh-prc-entry],[data-dsh-atb-entry],[data-dsh-taskboard-entry],[data-dsh-ssh-entry],[' + KB_ENTRY_ATTR + ']'))
-        if (family.length > 0) {
-          const last = family[family.length - 1]
-          last.parentElement.insertBefore(entry, last.nextSibling)
-        } else {
-          const row = button.closest('[class*="logoRow"]')
-          const base = (row && row.parentElement === root) ? row : button
-          root.insertBefore(entry, base.nextSibling)
-        }
-      }
-      return true
-    }
-
-    function mountKbSidebarEntry() {
-      let style = document.getElementById('dsh-kb-sidebar-style')
-      if (!style) {
-        style = document.createElement('style')
-        style.id = 'dsh-kb-sidebar-style'
-        style.textContent = `
-    .dsh-kb-entry{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 10px;margin:2px 0 8px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary,var(--dsw-text-primary,inherit));font:inherit;font-size:13px;cursor:pointer;text-align:left}
-    .dsh-kb-entry:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent)}
-    .dsh-kb-entry .dsh-kb-entry-icon{flex:none}
-    .dsh-kb-entry .dsh-kb-entry-stats{margin-left:auto;display:inline-flex;gap:3px;font-size:11px;color:var(--dsw-alias-label-secondary,var(--dsw-text-secondary,gray));font-variant-numeric:tabular-nums;white-space:nowrap}
-    [data-sidebar-collapsed] .dsh-kb-entry,[class*="_collapsed"] .dsh-kb-entry{width:36px;height:36px;min-width:36px;margin:0 0 12px;padding:0;justify-content:center;gap:0;text-align:center}
-    [data-sidebar-collapsed] .dsh-kb-entry .dsh-kb-entry-label,[data-sidebar-collapsed] .dsh-kb-entry .dsh-kb-entry-stats,[class*="_collapsed"] .dsh-kb-entry .dsh-kb-entry-label,[class*="_collapsed"] .dsh-kb-entry .dsh-kb-entry-stats{display:none}
-    `
-        document.head.appendChild(style)
-      }
-
-      const entry = document.createElement('button')
-      entry.type = 'button'
-      entry.setAttribute(KB_ENTRY_ATTR, '')
-      entry.className = 'dsh-kb-entry'
-      entry.title = '知识库 — 浏览 / 搜索 / 蒸馏队列'
-      entry.innerHTML = '<span class="dsh-kb-entry-icon">📚</span><span class="dsh-kb-entry-label">知识库</span><span class="dsh-kb-entry-stats"></span>'
-      entry.addEventListener('click', () => { if (kbOpen) kbOpen() })
-      const stats = entry.querySelector('.dsh-kb-entry-stats')
-      const refreshStats = () => {
-        fetch(`${API}/status`).then((r) => r.json()).then((d) => {
-          if (stats && d && d.counts) stats.textContent = d.counts.wiki + ' | ' + d.counts.raw
-        }).catch(() => {})
-      }
-      refreshStats()
-      const poll = setInterval(refreshStats, 30000)
-
-      let root
-      let placed = false
-      const rootObserver = new MutationObserver(() => {
-        if (!root || !root.isConnected) { placed = false; tryPlace(); return }
-        if (!root.contains(entry)) placed = placeKbEntry(root, entry)
-      })
-      const tryPlace = () => {
-        if (root && !root.isConnected) { rootObserver.disconnect(); root = undefined; placed = false }
-        if (placed) { if (document.body.contains(entry)) return; rootObserver.disconnect(); root = undefined; placed = false }
-        root = root || kbSidebarRoot()
-        if (!root) return
-        placed = placeKbEntry(root, entry)
-        if (placed) rootObserver.observe(root, { childList: true })
-      }
-      const waitObserver = new MutationObserver(() => tryPlace())
-      waitObserver.observe(document.body, { childList: true, subtree: true })
-      const retry = setInterval(tryPlace, 2000)
-      tryPlace()
-
-      return () => {
-        clearInterval(retry)
-        waitObserver.disconnect()
-        rootObserver.disconnect()
-        try { entry.remove() } catch {}
-      }
     }
 
     /** 全页知识库 overlay + 侧栏触发按钮。 */
