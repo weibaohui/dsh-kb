@@ -1,7 +1,7 @@
 {
   "name": "@weibaohui/dsh-kb",
-  "version": "0.1.0",
-  "description": "dsh 插件 · 团队知识库：离线知识共享（FDE 盒子场景），浏览/全文检索/加工入口；写路径收口 agent，基于 Karpathy LLM Wiki 模式（raw 不可变 / 两步加工 / log 流水 / 月度 lint）。",
+  "version": "0.2.0",
+  "description": "dsh 插件 · 团队知识库：离线知识共享（FDE 盒子场景），浏览/全文检索/加工入口；raw 入料自动入队、bot 会话串行蒸馏成文（Karpathy LLM Wiki 模式：raw 不可变 / 两步加工 / log 流水 / 月度 lint）。",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
@@ -32,7 +32,7 @@
     }
   },
   "scripts": {
-    "check": "node --check src/index.js && node --check src/kb-core.js && node --check client/index.js",
+    "check": "node --check src/index.js && node --check src/kb-core.js && node --check src/queue.js && node --check client/index.js",
     "test": "node --test \"test/*.test.js\"",
     "build:client": "node scripts/build-client.mjs"
   },
@@ -42,6 +42,7 @@
     "knowledge-base",
     "wiki",
     "llm-wiki",
+    "auto-distill",
     "fde",
     "offline",
     "full-text-search"

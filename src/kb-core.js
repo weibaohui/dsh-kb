@@ -19,11 +19,11 @@ const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
 
-const VERSION = '0.1.0'
+const VERSION = '0.2.0'
 
 const RAW_DIR = 'raw'
 const WIKI_DIR = 'wiki'
-const BOOT_DIRS = [RAW_DIR, path.join(WIKI_DIR, 'howtos'), path.join(WIKI_DIR, 'decisions'), path.join(WIKI_DIR, 'postmortems')]
+const BOOT_DIRS = [RAW_DIR, path.join(WIKI_DIR, 'howtos'), path.join(WIKI_DIR, 'decisions'), path.join(WIKI_DIR, 'postmortems'), path.join(WIKI_DIR, 'notes')]
 const BOOT_FILES = ['index.md', 'log.md', 'schema.md']
 
 const MAX_LIST_ENTRIES = 5000
@@ -352,6 +352,7 @@ updated: ${today()}
 - \`wiki/howtos/\` 操作手册：症状 → 原因 → 步骤 → 验证
 - \`wiki/decisions/\` 决策记录：背景 → 选项 → 结论 → 后果
 - \`wiki/postmortems/\` 复盘：时间线 → 根因 → 改进项
+- \`wiki/notes/\` 读书摘记/成书笔记：教材、书籍、长文等不成 howto/decision/postmortem 形态的素材
 - \`index.md\` 目录：每篇成文必须挂进对应小节
 - \`log.md\` 操作流水：每次加工追加一行
 
@@ -377,6 +378,13 @@ updated: ${today()}
 \`\`\`
 - YYYY-MM-DD HH:mm <author> <新增|更新|标注矛盾> <wiki 路径> ← <raw 路径>
 \`\`\`
+
+## 自动蒸馏（v0.2+）
+
+- 插件内置自动蒸馏：新入 raw/ 的素材自动入队，由 kb-bot 会话按本 schema 逐个加工（串行）
+- log.md 中 author 为 \`kb-bot\` 的行来自自动队列；交互会话不必重复加工已入队素材（以队列为准）
+- 队列台账在 \`~/.dsh/dsh-kb/queue.json\`（插件运行时状态，不在本库内）
+- kb-bot 加工的页面 author 一律 \`kb-bot\`；人工纠错照常更新页面并把 author 写自己
 `
 
 const BOOT_INDEX = `---
@@ -438,6 +446,7 @@ function defaultRoot() {
 module.exports = {
   VERSION, KbError,
   RAW_DIR, WIKI_DIR, BOOT_DIRS, BOOT_FILES,
+  TEXT_EXT, walkFiles,
   ensureRoot, resolveExisting, resolveCreatable, lexicalAbs, cleanSegment,
   listDir, parseFrontmatter, readDoc, sendFile, search, uploadRaw,
   statusPayload, bootstrap, defaultRoot,

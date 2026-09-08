@@ -3,7 +3,7 @@
 [![DSH plugin](https://img.shields.io/badge/dsh-plugin-green)](https://github.com/topics/dsh-plugin)
 [![npm version](https://img.shields.io/npm/v/@weibaohui/dsh-kb)](https://www.npmjs.com/package/@weibaohui/dsh-kb)
 
-**dsh 插件 · 团队知识库**：离线知识共享（FDE 盒子场景）。侧栏入口进全页知识库——目录树浏览、全文搜索、markdown 阅读、raw 素材上传、任意条目 `@` 给 agent。**写路径收口在 agent**（配套 skill），插件本体只读为主。
+**dsh 插件 · 团队知识库**：离线知识共享（FDE 盒子场景）。侧栏入口进全页知识库——目录树浏览、全文搜索、markdown 阅读、raw 素材上传、任意条目 `@` 给 agent。**上传即自动蒸馏**（v0.2+）：素材入队后由 kb-bot 会话按 schema 串行加工成文，也可继续手动 `@` 给 agent 精加工。
 
 基于 Karpathy LLM Wiki 模式：raw（不可变素材）→ wiki（成文知识）→ schema（约定），人丢素材、agent 两步加工（分析 → 成文）维护 index 与 log。
 
@@ -12,6 +12,7 @@
 ## 核心功能
 
 - **全页知识库**：侧栏底部「📚 知识库」进入；左栏目录树（wiki / raw 懒加载），右栏阅读或搜索
+- **自动蒸馏**（v0.2+）：raw/ 新素材自动入队（上传钩子 + 文件监视 + 周期兜底扫描），bot 会话逐个蒸馏；「⚗️ 蒸馏队列」面板看进度/重试/取消/跳转会话，支持暂停、失败退避重试、重启自动恢复、大文件按章节分批成文
 - **全文搜索**：内置零依赖扫描（大小写不敏感，文本类文件，命中高亮），无需安装任何外部工具
 - **markdown 阅读**：frontmatter 徽章（标题/作者/标签/更新时间）、`[[wikilink]]`、内部链接、图片内联、代码块、表格
 - **素材上传**：raw/ 区可上传（log/截图/抓包…），服务端强制只进 raw/、拒绝覆盖（raw 不可变）
@@ -26,7 +27,8 @@
 ├── wiki/
 │   ├── howtos/           # 症状 → 原因 → 步骤 → 验证
 │   ├── decisions/        # 背景 → 选项 → 结论 → 后果
-│   └── postmortems/      # 时间线 → 根因 → 改进项
+│   ├── postmortems/      # 时间线 → 根因 → 改进项
+│   └── notes/            # 读书摘记/成书笔记（自动蒸馏大文件落这里）
 ├── index.md              # 目录（agent 维护，每篇成文必须挂入）
 ├── log.md                # 操作流水（谁、何时、动了哪些篇）
 └── schema.md             # agent 规则（页面规范 / 两步加工 / 矛盾标注）

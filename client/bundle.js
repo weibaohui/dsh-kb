@@ -26,6 +26,9 @@ window.__ModuleLoader__.load({
 
     const API = '/dsh-kb/api'
 
+    /** 客户端会话服务（apply 时 ctx.inject(['sessions']) 懒注入；缺席时「打开会话」降级提示）。 */
+    let sessionsSvc = null
+
     const styles = {
       _head: null,
       insert(css) {
@@ -108,6 +111,26 @@ window.__ModuleLoader__.load({
     .kb-recent-link{color:var(--dsw-alias-brand-primary);cursor:pointer}
     .kb-recent-link:hover{text-decoration:underline}
     .kb-recent-raw{color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:11px}
+    .kb-q-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+    .kb-q-stats{display:flex;gap:6px;flex-wrap:wrap;flex:1;min-width:0}
+    .kb-q-banner{font-size:12px;line-height:1.6;border:1px solid color-mix(in srgb,var(--dsw-alias-label-primary) 24%,var(--dsw-alias-border-l2));border-radius:8px;padding:8px 12px;margin:0 0 12px;color:var(--dsw-alias-label-secondary)}
+    .kb-q-row{display:flex;align-items:flex-start;gap:10px;padding:9px 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:9px;margin:0 0 8px}
+    .kb-q-main{flex:1;min-width:0}
+    .kb-q-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .kb-q-rel{font-size:11px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-family:var(--ds-font-family-code,ui-monospace,monospace);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .kb-q-note{font-size:12px;color:var(--dsw-alias-label-secondary);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .kb-q-note.err{color:#d64545}
+    .kb-q-side{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+    .kb-q-time{font-size:11px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))}
+    .kb-q-acts{display:flex;gap:4px}
+    .kb-q-acts .kb-btn{font-size:11px;padding:2px 8px}
+    .kb-chip.running{color:var(--dsw-alias-brand-primary);border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 45%,var(--dsw-alias-border-l2));font-weight:600}
+    .kb-chip.queued{color:var(--dsw-alias-label-secondary)}
+    .kb-chip.done{color:#2e9e5b;border-color:color-mix(in srgb,#2e9e5b 40%,var(--dsw-alias-border-l2))}
+    .kb-chip.failed{color:#d64545;border-color:color-mix(in srgb,#d64545 40%,var(--dsw-alias-border-l2));font-weight:600}
+    .kb-chip.skipped{color:var(--dsw-alias-label-secondary);border-style:dashed}
+    .kb-q-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-layer-1);font-size:10.5px;font-weight:700;margin-left:6px}
+    .kb-q-badge.alert{background:#d64545}
     `)
 
     async function readJson(response) {
@@ -473,6 +496,68 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** 蒸馏队列状态 chip 文案。 */
+    const Q_STATUS_LABEL = { queued: '排队', running: '蒸馏中', done: '完成', failed: '失败', skipped: '跳过' }
+
+    /** 跳到 bot 会话（客户端 sessions 服务 open(id)，dsh-process 同款懒解析）。 */
+    function openKbSession(sessionId, hint) {
+      const svc = sessionsSvc
+      if (!svc || typeof svc.open !== 'function') { hint('客户端会话服务不可用，无法跳转'); return }
+      try { svc.open(sessionId); hint('已打开 bot 会话') } catch (e) { hint(String((e && e.message) || e)) }
+    }
+
+    /** 右栏：自动蒸馏队列视图（数据由 KbPage 统一轮询，这里只渲染+发起操作）。 */
+    function QueueView(props) {
+      const h = React.createElement
+      const { data, onAction, onNav, onHint } = props
+      if (!data) return h('div', { className: 'kb-spin' }, '读取队列…')
+      const stats = data.stats || {}
+      const statChips = ['running', 'queued', 'failed', 'done', 'skipped'].map((k) =>
+        h('span', { className: `kb-chip ${k}`, key: k }, `${Q_STATUS_LABEL[k]} ${stats[k] || 0}`))
+      const items = data.items || []
+      return h('div', null,
+        h('div', { className: 'kb-q-head' },
+          h('div', { className: 'kb-q-stats' }, statChips,
+            data.enabled === false ? h('span', { className: 'kb-chip skipped' }, '自动蒸馏已停用（设置）') : null,
+            data.paused ? h('span', { className: 'kb-chip skipped' }, '已暂停') : null,
+          ),
+          h('button', { className: 'kb-btn', onClick: () => onAction('pause', { paused: !(data.pausedByUser || data.paused) }) },
+            (data.pausedByUser || data.paused) ? '▶ 恢复' : '⏸ 暂停'),
+          h('button', { className: 'kb-btn', onClick: () => onAction('scan', {}) }, '扫描 raw/'),
+        ),
+        (data.executorDown || data.lastError) && h('div', { className: 'kb-q-banner' },
+          `⚠️ 执行器不可用：${data.lastError || '稍后自动重试'}（排队条目会保留，配置好模型后自动继续）`),
+        data.enabled === false && h('div', { className: 'kb-q-banner' },
+          '自动蒸馏已在设置中停用：素材仍会入队留档，但不会执行；可手动 @ 给 agent 加工。'),
+        !items.length && h('div', { className: 'kb-empty' }, '队列为空：往 raw/ 上传素材后会自动入队蒸馏。'),
+        items.map((it) => h('div', { className: 'kb-q-row', key: it.id },
+          h('div', { className: 'kb-q-main' },
+            h('div', { className: 'kb-q-name' },
+              h('span', { className: `kb-chip ${it.status}` }, Q_STATUS_LABEL[it.status] || it.status),
+              ' ', it.rel.split('/').pop(),
+              it.chunk ? h('span', { className: 'kb-q-time' }, `（片 ${it.chunk.idx}/${it.chunk.total}）`) : null,
+              it.attempts > 1 ? h('span', { className: 'kb-q-time' }, `（第 ${it.attempts} 次）`) : null,
+            ),
+            h('div', { className: 'kb-q-rel' }, it.rel),
+            it.note ? h('div', { className: `kb-q-note${it.status === 'failed' ? ' err' : ''}`, title: it.error || it.note }, it.note || it.error) : null,
+            it.error && it.note ? h('div', { className: 'kb-q-note err', title: it.error }, it.error) : null,
+          ),
+          h('div', { className: 'kb-q-side' },
+            h('span', { className: 'kb-q-time' }, it.finishedAt || it.startedAt ? fmtTime(Date.parse(it.finishedAt || it.startedAt)) : ''),
+            h('div', { className: 'kb-q-acts' },
+              (it.status === 'done' || it.status === 'failed') && it.pages && it.pages.length
+                ? h('button', { className: 'kb-btn', onClick: () => onNav({ kind: 'doc', rel: it.pages[0] }) }, '看产出') : null,
+              it.sessionId && (it.status === 'running' || it.status === 'done' || it.status === 'failed')
+                ? h('button', { className: 'kb-btn', onClick: () => openKbSession(it.sessionId, onHint) }, '打开会话') : null,
+              (it.status === 'failed' || it.status === 'done' || it.status === 'skipped')
+                ? h('button', { className: 'kb-btn', onClick: () => onAction('retry', { id: it.id }) }, '重试') : null,
+              it.status === 'queued' ? h('button', { className: 'kb-btn', onClick: () => onAction('cancel', { id: it.id }) }, '取消') : null,
+            ),
+          ),
+        )),
+      )
+    }
+
     /** 全页知识库 overlay + 侧栏触发按钮。 */
     function KbPage() {
       const h = React.createElement
@@ -484,6 +569,35 @@ window.__ModuleLoader__.load({
       const [toast, setToast] = React.useState(null)
       const [reloadTick, setReloadTick] = React.useState(0)
       const [uploadTick, setUploadTick] = React.useState(0)
+      const [queueData, setQueueData] = React.useState(null)
+
+      const fetchQueue = () => {
+        fetch(`${API}/queue`)
+          .then(readJson)
+          .then((d) => setQueueData(d))
+          .catch(() => { /* 队列面板打开时自有错误提示；徽章静默 */ })
+      }
+
+      React.useEffect(() => {
+        if (!open) return undefined
+        fetchQueue()
+        const timer = setInterval(fetchQueue, 2500)
+        return () => clearInterval(timer)
+      }, [open])
+
+      const queueAction = async (op, body) => {
+        try {
+          await readJson(await fetch(`${API}/queue/${op}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body || {}),
+          }))
+          if (op !== 'scan') showHint(op === 'pause' ? (body.paused ? '队列已暂停（跑完当前为止）' : '队列已恢复') : '已执行')
+        } catch (e) {
+          showHint(`操作失败：${(e && e.message) || e}`)
+        }
+        fetchQueue()
+      }
 
       const refresh = () => {
         setError(null)
@@ -546,6 +660,15 @@ window.__ModuleLoader__.load({
       const quick = (rel, label, icon) => h('button', { className: 'kb-item', 'data-cur': nav.kind === 'doc' && nav.rel === rel, onClick: () => onNav({ kind: 'doc', rel }) },
         h('span', null, icon), h('span', { className: 'nm' }, label))
 
+      const qStats = queueData && queueData.stats
+      const qPending = qStats ? (qStats.queued || 0) + (qStats.running || 0) : 0
+      const qFailed = qStats ? qStats.failed || 0 : 0
+      const queueEntry = h('button', { className: 'kb-item', 'data-cur': nav.kind === 'queue', onClick: () => onNav({ kind: 'queue' }) },
+        h('span', null, '⚗️'),
+        h('span', { className: 'nm' }, '蒸馏队列'),
+        qPending > 0 ? h('span', { className: `kb-q-badge${qFailed > 0 ? ' alert' : ''}` }, qPending) : null,
+      )
+
       const counts = status && status.counts
         ? h('span', { className: 'kb-counts' }, `wiki ${status.counts.wiki} · raw ${status.counts.raw}`)
         : null
@@ -570,6 +693,7 @@ window.__ModuleLoader__.load({
               quick('index.md', '目录', '📖'),
               quick('log.md', '操作流水', '🧾'),
               quick('schema.md', 'KB 约定', '📐'),
+              queueEntry,
               h(TreeSection, { rootRel: 'wiki', label: 'wiki · 成文知识', cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, reloadTick }),
               h(TreeSection, { rootRel: 'raw', label: 'raw · 素材（不可变）', cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, reloadTick }),
             ),
@@ -577,6 +701,7 @@ window.__ModuleLoader__.load({
               error && h('div', { className: 'kb-err' }, error),
               !error && nav.kind === 'doc' && h(DocView, { rel: nav.rel, root: status && status.root, onNav, onAt: atRel, onUpload: upload, reloadTick, uploadTick }),
               !error && nav.kind === 'search' && h(SearchView, { q: nav.q, onNav, onAt: atRel }),
+              !error && nav.kind === 'queue' && h(QueueView, { data: queueData, onAction: queueAction, onNav, onHint: showHint }),
             ),
           ),
         ),
@@ -592,6 +717,11 @@ window.__ModuleLoader__.load({
         const slots = ctx.get('slots')
         if (slots === undefined) return
         // 不 return 任何值（cordis-plugin-loader 把 apply 返回值当 disposable/effect）。
+
+        // 会话服务：动态 inject（客户端 ctx 支持；缺席时「打开会话」降级提示）
+        try {
+          if (typeof ctx.inject === 'function') ctx.inject(['sessions'], (scope) => { sessionsSvc = scope && scope.sessions })
+        } catch (e) { console.error('[dsh-kb] sessions inject:', e) }
 
         slots.inject('sidebar.footer.action', () => slots.register(
           { name: 'sidebar.footer.action', id: '@weibaohui/dsh-kb', order: 32 },
