@@ -166,16 +166,29 @@ window.__ModuleLoader__.load({
       return `${API}/file?path=${encodeURIComponent(rel)}${dl ? '&dl=1' : ''}`
     }
 
-    /** @绝对路径 → composer（先关 overlay；失败退化复制到剪贴板）。 */
+    /** @绝对路径 → composer（先关 overlay；失败退化复制到剪贴板）。
+     *  composer 有两种形态：textarea（旧）/ contenteditable 输入区（2026-09 新组合，
+     *  hasTa:false hasCe:true——只找 textarea 会静默退化成剪贴板）。 */
     function insertFileRef(abs) {
       const text = '@' + abs + ' '
       try {
         const card = document.querySelector('[data-composer-card]')
         const ta = card && card.querySelector('textarea')
-        if (ta && typeof document.execCommand === 'function') {
-          ta.focus()
-          const len = ta.value ? ta.value.length : 0
-          try { ta.setSelectionRange(len, len) } catch {}
+        const ce = card && (card.querySelector('[contenteditable="true"]') || card.querySelector('[contenteditable=""]'))
+        if (typeof document.execCommand === 'function' && (ta || ce)) {
+          if (ta) {
+            ta.focus()
+            const len = ta.value ? ta.value.length : 0
+            try { ta.setSelectionRange(len, len) } catch {}
+          } else if (ce) {
+            ce.focus()
+            const sel = window.getSelection()
+            const range = document.createRange()
+            range.selectNodeContents(ce)
+            range.collapse(false) // 光标到末尾
+            sel.removeAllRanges()
+            sel.addRange(range)
+          }
           if (document.execCommand('insertText', false, text)) return 'ok'
         }
       } catch {}
