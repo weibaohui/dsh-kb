@@ -697,10 +697,17 @@ window.__ModuleLoader__.load({
         h('span', { className: 'nm', onClick: () => onPick(root, r.rel) }, r.name),
       ))
 
-      const style = {
-        left: Math.max(8, Math.min(anchor.left, (window.innerWidth || 1280) - 336)),
-        top: Math.max(8, anchor.top - 348),
-      }
+      const style = (() => {
+        const winW = typeof window !== 'undefined' ? window.innerWidth : 1280
+        const winH = typeof window !== 'undefined' ? window.innerHeight : 800
+        const width = 320
+        return {
+          left: Math.max(8, Math.min(anchor.left, winW - width - 8)),
+          // bottom 锚定（experts 同款）：贴着按钮上方，展开时向上生长
+          bottom: Math.max(8, winH - anchor.top + 6),
+          maxHeight: Math.max(180, Math.min(340, anchor.top - 20)),
+        }
+      })()
       return h('div', { className: 'kbc-pop', style, role: 'dialog' },
         h('div', { className: 'kbc-pop-h' }, '选择知识库目录 —— 此后这段对话基于该目录推理'),
         err && h('div', { className: 'kbc-pop-h' }, '加载失败：' + err),
