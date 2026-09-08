@@ -746,10 +746,113 @@ function KbComposerButtonSlot(props) {
   )
 }
 
+// ── 侧栏导航入口（工艺库下方，dsh-process 同款 DOM 注入）────────────────
+const KB_ENTRY_ATTR = 'data-dsh-kb-entry'
+
+function kbSidebarRoot() {
+  const column = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"], .dshDesktopUpstreamSidebar, .dshDesktopSidebarSurface')
+  if (column === null) return undefined
+  const logoOwner = column.querySelector('[class*="logoRow"]') && column.querySelector('[class*="logoRow"]').parentElement
+  return logoOwner || (column.firstElementChild || undefined)
+}
+
+function kbNewSessionButton(root) {
+  const nested = root.querySelector('button[class*="newSession"]')
+  if (nested) return nested
+  for (const child of root.children) {
+    if (child instanceof HTMLButtonElement && !child.matches('[' + KB_ENTRY_ATTR + ']')) return child
+  }
+  const buttons = Array.from(root.querySelectorAll('button'))
+  return buttons.find((b) => !b.matches('[' + KB_ENTRY_ATTR + ']') && /新会话|新建会话|new session/i.test(b.textContent || ''))
+}
+
+/** 放置：排在插件入口家族（工艺库等）之后；家族为空则贴新会话按钮。 */
+function placeKbEntry(root, entry) {
+  const button = kbNewSessionButton(root)
+  if (!button) return false
+  if (entry.parentElement !== root) {
+    const family = Array.from(root.children).filter((el) => el instanceof HTMLElement
+      && el.matches('[data-dsh-prc-entry],[data-dsh-atb-entry],[data-dsh-taskboard-entry],[data-dsh-ssh-entry],[' + KB_ENTRY_ATTR + ']'))
+    if (family.length > 0) {
+      const last = family[family.length - 1]
+      last.parentElement.insertBefore(entry, last.nextSibling)
+    } else {
+      const row = button.closest('[class*="logoRow"]')
+      const base = (row && row.parentElement === root) ? row : button
+      root.insertBefore(entry, base.nextSibling)
+    }
+  }
+  return true
+}
+
+function mountKbSidebarEntry() {
+  let style = document.getElementById('dsh-kb-sidebar-style')
+  if (!style) {
+    style = document.createElement('style')
+    style.id = 'dsh-kb-sidebar-style'
+    style.textContent = `
+.dsh-kb-entry{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 10px;margin:2px 0 8px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary,var(--dsw-text-primary,inherit));font:inherit;font-size:13px;cursor:pointer;text-align:left}
+.dsh-kb-entry:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent)}
+.dsh-kb-entry .dsh-kb-entry-icon{flex:none}
+.dsh-kb-entry .dsh-kb-entry-stats{margin-left:auto;display:inline-flex;gap:3px;font-size:11px;color:var(--dsw-alias-label-secondary,var(--dsw-text-secondary,gray));font-variant-numeric:tabular-nums;white-space:nowrap}
+[data-sidebar-collapsed] .dsh-kb-entry,[class*="_collapsed"] .dsh-kb-entry{width:36px;height:36px;min-width:36px;margin:0 0 12px;padding:0;justify-content:center;gap:0;text-align:center}
+[data-sidebar-collapsed] .dsh-kb-entry .dsh-kb-entry-label,[data-sidebar-collapsed] .dsh-kb-entry .dsh-kb-entry-stats,[class*="_collapsed"] .dsh-kb-entry .dsh-kb-entry-label,[class*="_collapsed"] .dsh-kb-entry .dsh-kb-entry-stats{display:none}
+`
+    document.head.appendChild(style)
+  }
+
+  const entry = document.createElement('button')
+  entry.type = 'button'
+  entry.setAttribute(KB_ENTRY_ATTR, '')
+  entry.className = 'dsh-kb-entry'
+  entry.title = '知识库 — 浏览 / 搜索 / 蒸馏队列'
+  entry.innerHTML = '<span class="dsh-kb-entry-icon">📚</span><span class="dsh-kb-entry-label">知识库</span><span class="dsh-kb-entry-stats"></span>'
+  entry.addEventListener('click', () => { if (kbOpen) kbOpen() })
+  const stats = entry.querySelector('.dsh-kb-entry-stats')
+  const refreshStats = () => {
+    fetch(`${API}/status`).then((r) => r.json()).then((d) => {
+      if (stats && d && d.counts) stats.textContent = d.counts.wiki + ' | ' + d.counts.raw
+    }).catch(() => {})
+  }
+  refreshStats()
+  const poll = setInterval(refreshStats, 30000)
+
+  let root
+  let placed = false
+  const rootObserver = new MutationObserver(() => {
+    if (!root || !root.isConnected) { placed = false; tryPlace(); return }
+    if (!root.contains(entry)) placed = placeKbEntry(root, entry)
+  })
+  const tryPlace = () => {
+    if (root && !root.isConnected) { rootObserver.disconnect(); root = undefined; placed = false }
+    if (placed) { if (document.body.contains(entry)) return; rootObserver.disconnect(); root = undefined; placed = false }
+    root = root || kbSidebarRoot()
+    if (!root) return
+    placed = placeKbEntry(root, entry)
+    if (placed) rootObserver.observe(root, { childList: true })
+  }
+  const waitObserver = new MutationObserver(() => tryPlace())
+  waitObserver.observe(document.body, { childList: true, subtree: true })
+  const retry = setInterval(tryPlace, 2000)
+  tryPlace()
+
+  return () => {
+    clearInterval(retry)
+    waitObserver.disconnect()
+    rootObserver.disconnect()
+    try { entry.remove() } catch {}
+  }
+}
+
 /** 全页知识库 overlay + 侧栏触发按钮。 */
+let kbOpen = null // 侧栏 DOM 入口 → 打开 overlay 的桥（KbPage 挂载时注册）
 function KbPage() {
   const h = React.createElement
   const [open, setOpen] = React.useState(false)
+  React.useEffect(() => {
+    kbOpen = () => setOpen(true)
+    return () => { kbOpen = null }
+  }, [])
   const [status, setStatus] = React.useState(null)
   const [nav, setNav] = React.useState({ kind: 'doc', rel: 'index.md' })
   const [query, setQuery] = React.useState('')
@@ -956,10 +1059,18 @@ module.exports = {
       if (typeof ctx.inject === 'function') ctx.inject(['sessions'], (scope) => { sessionsSvc = scope && scope.sessions })
     } catch (e) { console.error('[dsh-kb] sessions inject:', e) }
 
-    slots.inject('sidebar.footer.action', () => slots.register(
-      { name: 'sidebar.footer.action', id: '@weibaohui/dsh-kb', order: 32 },
-      () => React.createElement(KbPage),
-    ))
+    // 侧栏导航入口（工艺库下方，dsh-process 同款 DOM 注入）+ 隐藏挂载 overlay
+    try {
+      const RDClient = require('react-dom/client')
+      if (RDClient && typeof RDClient.createRoot === 'function') {
+        const mount = document.createElement('div')
+        mount.style.cssText = 'position:absolute;left:-9999px;top:0;width:0;height:0;'
+        document.body.appendChild(mount)
+        RDClient.createRoot(mount).render(React.createElement(KbPage))
+        const disposeSidebar = mountKbSidebarEntry()
+        ctx.effect(() => () => { disposeSidebar(); try { RDClient.createRoot(mount).unmount() } catch {} }, 'dsh-kb: sidebar entry')
+      }
+    } catch (e) { console.error('[dsh-kb] sidebar entry:', e) }
 
     // 对话框「+ 知识库」按钮（composer 工具行）：动态 inject（静态列服务会拖住插件激活）
     try {
