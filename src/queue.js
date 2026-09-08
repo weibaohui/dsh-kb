@@ -143,7 +143,7 @@ function buildDistillPrompt(item) {
     '',
     '第一步必须读知识库根目录下的 schema.md（最终权威）与 index.md（已有条目清单）。',
     '- 严格两步加工：先分析（关键实体/步骤/结论，对照 wiki 已有条目找关联、矛盾、缺口），再生成',
-    '- 页面规范照 schema.md：frontmatter 必填（title/tags/author/created/updated），author 固定写 kb-bot，sources 引用本 raw 路径',
+    '- 页面规范照 schema.md：frontmatter 必填（title/tags/keywords/author/created/updated），author 固定写 kb-bot，sources 引用本 raw 路径；keywords 写 3~8 个检索关键词，source-note 写来源属性（素材类型｜章节范围｜分片序号）',
     '- 与已有条目矛盾必须双边显式标注「⚠️ 与 [[对方]] 矛盾」并说明适用环境差异；不确定写「待确认」，不许编',
     '- raw/ 不可变，不得修改删除；写完页面后必须把新页面挂进 index.md 对应小节、log.md 追加一行，均先读后写（log 行 author 用 kb-bot）',
     '',

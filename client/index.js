@@ -566,6 +566,166 @@ function QueueView(props) {
   )
 }
 
+// ── 对话框「+ 知识库」：composer 工具行按钮 + 目录选择浮层 ──────────────
+// 机制对齐 experts-management 的 +专家：conversation.input.left slot +
+// slash/input-insert-text 写草稿（写文本而非 @ 引用——@ 目录卡片行为未约定，
+// 绝对路径 + 明确指令对 agent 最稳）。
+
+let RDP = null
+try { RDP = require('react-dom') } catch {}
+
+let kbComposerStyles = null
+function ensureKbComposerStyles() {
+  if (kbComposerStyles || typeof document === 'undefined') return
+  const style = document.createElement('style')
+  style.setAttribute('data-plugin', 'dsh-kb-composer')
+  style.textContent = `
+.kbc-chip{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 9px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.kbc-chip:hover{color:var(--dsw-alias-brand-primary);border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 40%,var(--dsw-alias-border-l2))}
+.kbc-pop{position:fixed;z-index:2147483001;width:320px;max-height:340px;overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);box-shadow:0 8px 28px rgba(0,0,0,.18);padding:6px}
+.kbc-pop-h{font-size:11px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));padding:6px 8px 4px}
+.kbc-row{display:flex;align-items:center;gap:6px;width:100%;border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;padding:5px 8px;border-radius:7px;cursor:pointer;text-align:left}
+.kbc-row:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent)}
+.kbc-row .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kbc-row .caret{width:14px;flex:none;border:0;background:transparent;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));cursor:pointer;font-size:10px;padding:0}
+.kbc-row .path{font-size:10.5px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))}
+.kbc-back{position:fixed;inset:0;z-index:2147483000}
+`
+  document.head.appendChild(style)
+  kbComposerStyles = style
+}
+
+/** 锚定文本：让这段对话基于所选知识库目录推理（纯函数）。 */
+function buildGroundingText(dirAbs) {
+  return `【知识库上下文】请基于目录 ${dirAbs} 推理：先浏览其中文件；各文件 frontmatter 的 sources（原始素材位置）、keywords/source-note（关键词与来源属性）可用于回溯，需要细节直接回读原文。\n\n我的问题：`
+}
+
+/** 把文本追加进会话草稿（宿主 slash/input-insert-text 事件，span CAS）。 */
+function insertComposerText(composerScope, sessionId, input, text) {
+  const sessions = composerScope && composerScope.sessions
+  if (!sessions) return false
+  let actx
+  try { actx = sessions.scope(sessionId) } catch { return false }
+  if (actx === undefined || actx === null || typeof actx.bail !== 'function') return false
+  const draft = (input && input.draft) || ''
+  const at = draft.length
+  try {
+    return actx.bail(actx, 'slash/input-insert-text', {
+      text,
+      span: { start: at, end: at, draftRev: (input && input.draftRev) || 0 },
+    }) === true
+  } catch { return false }
+}
+
+let kbRootCache = null // { root, at }
+async function fetchKbRoot() {
+  if (kbRootCache && Date.now() - kbRootCache.at < 60000) return kbRootCache.root
+  const root = await fetch(`${API}/status`).then(readJson).then((d) => d.root).catch(() => null)
+  if (root) kbRootCache = { root, at: Date.now() }
+  return root
+}
+
+/** 知识库目录选择浮层：raw/ + wiki/ 懒加载目录树，点目录名即选。 */
+function KbDirPicker(props) {
+  const h = React.createElement
+  const { root, anchor, onPick, onClose } = props
+  const [rows, setRows] = React.useState(() => ([
+    { rel: '', name: '📚 整个知识库', depth: 0, expandable: false },
+    { rel: 'raw', name: 'raw · 原始素材', depth: 0, expandable: true },
+    { rel: 'wiki', name: 'wiki · 成文知识', depth: 0, expandable: true },
+  ]))
+  const [expanded, setExpanded] = React.useState({})
+  const [err, setErr] = React.useState(null)
+
+  const loadKids = (rel) => {
+    fetch(`${API}/tree?path=${encodeURIComponent(rel)}`)
+      .then(readJson)
+      .then((d) => {
+        const dirs = (d.entries || []).filter((e) => e.type === 'dir').map((e) => ({
+          rel: rel + '/' + e.name, name: e.name, depth: rel.split('/').length, expandable: true,
+        }))
+        setRows((rs) => {
+          const out = []
+          let inserting = false
+          for (const r of rs) {
+            if (r.rel === rel) { out.push(r); inserting = true; continue }
+            const depth = r.rel.split('/').length
+            if (inserting && depth <= rel.split('/').length) inserting = false
+            if (!inserting) out.push(r)
+          }
+          // 插到父行之后（按深度截断已展开的旧子树不存在——每节点只加载一次）
+          const idx = out.findIndex((r) => r.rel === rel)
+          return idx >= 0 ? [...out.slice(0, idx + 1), ...dirs, ...out.slice(idx + 1)] : rs
+        })
+      })
+      .catch((e) => setErr(String((e && e.message) || e)))
+  }
+
+  const toggle = (row) => {
+    if (expanded[row.rel]) { setExpanded((x) => ({ ...x, [row.rel]: false })); return }
+    setExpanded((x) => ({ ...x, [row.rel]: true }))
+    loadKids(row.rel)
+  }
+
+  const rowsView = rows.map((r) => h('div', { className: 'kbc-row', key: r.rel || 'root', style: { paddingLeft: 8 + r.depth * 14 } },
+    r.expandable
+      ? h('button', { className: 'caret', onClick: () => toggle(r), 'aria-label': '展开' }, expanded[r.rel] ? '▾' : '▸')
+      : h('span', { className: 'caret' }),
+    h('span', { className: 'nm', onClick: () => onPick(root, r.rel) }, r.name),
+  ))
+
+  const style = {
+    left: Math.max(8, Math.min(anchor.left, (window.innerWidth || 1280) - 336)),
+    top: Math.max(8, anchor.top - 348),
+  }
+  return h('div', { className: 'kbc-pop', style, role: 'dialog' },
+    h('div', { className: 'kbc-pop-h' }, '选择知识库目录 —— 此后这段对话基于该目录推理'),
+    err && h('div', { className: 'kbc-pop-h' }, '加载失败：' + err),
+    rowsView,
+  )
+}
+
+/** composer 工具行按钮（conversation.input.left slot）。 */
+function KbComposerButtonSlot(props) {
+  const h = React.createElement
+  React.useEffect(ensureKbComposerStyles, [])
+  const [picker, setPicker] = React.useState(null)
+  const [root, setRoot] = React.useState(null)
+  const btnRef = React.useRef(null)
+  const liveInput = React.useRef(props.input)
+  liveInput.current = props.input
+  const composerScope = props.composerScopeRef ? props.composerScopeRef() : null
+  if (!composerScope || !composerScope.sessions || !props.sessionId) return null
+
+  const close = () => setPicker(null)
+  const open = () => {
+    let anchor = { left: 16, top: 400 }
+    try { if (btnRef.current) anchor = btnRef.current.getBoundingClientRect() } catch {}
+    setPicker(anchor)
+    fetchKbRoot().then((r) => setRoot(r || '/Users/mac/.dsh/kb'))
+  }
+  const pick = (kbRoot, rel) => {
+    const dirAbs = rel ? (kbRoot.replace(/\/+$/, '') + '/' + rel) : kbRoot.replace(/\/+$/, '')
+    insertComposerText(composerScope, props.sessionId, liveInput.current, buildGroundingText(dirAbs))
+    close()
+    try {
+      const card = document.querySelector('[data-composer-card]')
+      const ta = card && card.querySelector('textarea')
+      if (ta && typeof ta.focus === 'function') ta.focus()
+    } catch {}
+  }
+  const popover = picker !== null && RDP && typeof RDP.createPortal === 'function'
+    ? RDP.createPortal(h(KbDirPicker, { root: root || '', anchor: picker, onPick: pick, onClose: close }), document.body)
+    : null
+  return h(React.Fragment, null,
+    h('button', {
+      className: 'kbc-chip', ref: btnRef, title: '基于知识库目录推理', 'aria-haspopup': 'dialog', 'aria-expanded': picker !== null,
+      onClick: () => (picker === null ? open() : close()),
+    }, '📚 知识库'),
+    popover,
+  )
+}
+
 /** 全页知识库 overlay + 侧栏触发按钮。 */
 function KbPage() {
   const h = React.createElement
@@ -780,5 +940,26 @@ module.exports = {
       { name: 'sidebar.footer.action', id: '@weibaohui/dsh-kb', order: 32 },
       () => React.createElement(KbPage),
     ))
+
+    // 对话框「+ 知识库」按钮（composer 工具行）：动态 inject（静态列服务会拖住插件激活）
+    try {
+      let composerScope = null
+      if (typeof ctx.inject === 'function') {
+        ctx.inject(['inputTriggers', 'sessions'], (scope) => { composerScope = scope })
+      }
+      ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+        name: 'conversation.input.left',
+        id: '@weibaohui/dsh-kb',
+        order: 63,
+        label: () => '基于知识库推理',
+        inject: () => ({}),
+      }, function KbComposerSlot(apiProps) {
+        return React.createElement(KbComposerButtonSlot, {
+          composerScopeRef: () => composerScope,
+          sessionId: apiProps && apiProps.sessionId,
+          input: apiProps && apiProps.input,
+        })
+      }))
+    } catch (e) { console.error('[dsh-kb] composer inject:', e) }
   },
 }

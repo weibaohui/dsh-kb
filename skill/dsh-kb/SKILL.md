@@ -31,10 +31,10 @@ description: 团队知识库（dsh-kb）的查询与沉淀。干活前先查知�
 
 ## 页面规范
 
-- 文件名 kebab-case 英文；目录按上面三类，不新增顶层目录
-- frontmatter 必填：`title / tags / author / created / updated`（author 问用户或用用户名；updated 每次改动都要更新）
+- 文件名 kebab-case 英文；目录按上面四类，不新增顶层目录
+- frontmatter 必填：`title / tags / keywords / author / created / updated`（author 问用户或用用户名；updated 每次改动都要更新）
 - 正文模板：howto = 症状 → 原因 → 步骤 → 验证；decision = 背景 → 选项 → 结论 → 后果；postmortem = 时间线 → 根因 → 改进项
-- 引用素材写进 frontmatter `sources: [raw/...]`
+- 引用素材写进 frontmatter `sources: [raw/...]`；`keywords` 写 3~8 个检索关键词；有分片/章节属性时加 `source-note: 类型｜范围｜分片`（如 `书籍分片｜第一集 18~26 章｜3/49`）——**读到产出文件时，从 sources/source-note 回溯原始素材，需要细节直接回读原文**
 - 互链用 `[[页面名]]`；**矛盾必须显式化**：与已有条目冲突时，两个页面都要加「⚠️ 与 [[对方]] 矛盾：适用环境差异是……」
 - 不确定的内容写进页面末尾「待确认」小节，不要编
 
