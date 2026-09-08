@@ -92,6 +92,9 @@ styles.insert(`
 .kb-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:8px 16px;font-size:12px;z-index:2147483600;box-shadow:0 4px 16px rgba(0,0,0,.18)}
 .kb-counts{font-size:11px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))}
 input.kb-file{display:none}
+.kb-page.kb-drop::after{content:'⬇ 松开，上传素材到知识库（自动蒸馏入队）';position:absolute;inset:10px;border:2px dashed var(--dsw-alias-brand-primary);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 8%,transparent);pointer-events:none;z-index:10}
+.kb-up{border:0;background:transparent;color:var(--dsw-alias-brand-primary);font-size:12px;cursor:pointer;padding:0 2px}
+.kb-up:hover{color:var(--dsw-alias-brand-primary);opacity:.8}
 .kb-spin{padding:24px 0;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:12px}
 /* 首页最近更新(log.md 尾部) */
 .kb-recent{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-2);padding:8px 12px;margin:0 0 14px}
@@ -359,7 +362,16 @@ function TreeSection(props) {
   }
 
   return [
-    h('div', { className: 'kb-side-h', key: rootRel }, h('span', null, label)),
+    h('div', { className: 'kb-side-h', key: rootRel },
+      h('span', null, label),
+      props.onUpload && rootRel === 'raw' ? h('label', { className: 'kb-up', title: '上传素材到 raw/（自动蒸馏）' },
+        '⬆ 上传',
+        h('input', {
+          type: 'file', multiple: true, className: 'kb-file',
+          onChange: (e) => { const fs = Array.from(e.target.files || []); e.target.value = ''; if (fs.length && props.onUpload) props.onUpload('raw', fs) },
+        }),
+      ) : null,
+    ),
     ...renderLevel(rootRel, 0),
   ]
 }
@@ -630,16 +642,50 @@ function KbPage() {
     if (!files || !files.length) return
     setError(null)
     const list = Array.from(files)
+    let okCount = 0
     for (const f of list) {
       try {
         await readJson(await fetch(`${API}/upload?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f }))
-        showHint(`已上传 ${f.name} 到 ${dir}/`)
+        okCount++
       } catch (e) {
         setError(`上传 ${f.name} 失败：${(e && e.message) || e}`)
       }
     }
+    if (okCount) showHint(`已上传 ${okCount} 个素材到 ${dir}/ · 自动蒸馏已入队 ⚗️`)
     setUploadTick((t) => t + 1)
     setReloadTick((t) => t + 1)
+  }
+
+  // 上传目标目录：正在看 raw/ 下文档时传其所在目录，否则 raw/ 根
+  const uploadTargetDir = () => {
+    if (nav.kind === 'doc' && nav.rel && nav.rel.startsWith('raw/') && nav.rel.includes('/')) {
+      const d = nav.rel.slice(0, nav.rel.lastIndexOf('/'))
+      if (d && d !== 'raw') return d
+    }
+    return 'raw'
+  }
+
+  // 整窗拖拽投放（计数器防 dragleave 穿越子元素抖动）
+  const dragDepth = React.useRef(0)
+  const [dropping, setDropping] = React.useState(false)
+  const onDragEnter = (e) => {
+    e.preventDefault()
+    if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+      dragDepth.current++
+      setDropping(true)
+    }
+  }
+  const onDragOver = (e) => { e.preventDefault() }
+  const onDragLeave = () => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+    if (!dragDepth.current) setDropping(false)
+  }
+  const onDrop = (e) => {
+    e.preventDefault()
+    dragDepth.current = 0
+    setDropping(false)
+    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || [])
+    if (files.length) upload(uploadTargetDir(), files)
   }
 
   const onNav = (n) => {
@@ -666,7 +712,11 @@ function KbPage() {
   return h(React.Fragment, null,
     h('button', { type: 'button', className: 'kb-trigger', onClick: () => setOpen(true), 'aria-label': '知识库' },
       h('span', { 'aria-hidden': 'true' }, '📚'), h('span', null, '知识库')),
-    open && h('div', { className: 'kb-page', role: 'dialog', 'aria-modal': 'true' },
+    open && h('div', {
+      className: 'kb-page' + (dropping ? ' kb-drop' : ''),
+      role: 'dialog', 'aria-modal': 'true',
+      onDragEnter, onDragOver, onDragLeave, onDrop,
+    },
       h('div', { className: 'kb-head' },
         h('p', { className: 'kb-title' }, '📚 知识库', counts),
         h('input', {
@@ -675,6 +725,13 @@ function KbPage() {
           onKeyDown: (e) => { if (e.key === 'Enter' && !(e.isComposing === true)) doSearch() },
         }),
         h('span', { className: 'kb-root', title: status && status.root }, status && status.root ? status.root : ''),
+        h('label', { className: 'kb-btn primary', style: { cursor: 'pointer' }, title: '上传素材（自动蒸馏入队）' },
+          '⬆ 上传素材',
+          h('input', {
+            type: 'file', multiple: true, className: 'kb-file',
+            onChange: (e) => { const fs = Array.from(e.target.files || []); e.target.value = ''; if (fs.length) upload(uploadTargetDir(), fs) },
+          }),
+        ),
         h('button', { className: 'kb-btn', onClick: refresh }, '刷新'),
         h('button', { className: 'kb-btn', onClick: () => setOpen(false) }, '✕ 关闭'),
       ),
@@ -685,7 +742,7 @@ function KbPage() {
           quick('schema.md', 'KB 约定', '📐'),
           queueEntry,
           h(TreeSection, { rootRel: 'wiki', label: 'wiki · 成文知识', cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, reloadTick }),
-          h(TreeSection, { rootRel: 'raw', label: 'raw · 素材（不可变）', cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, reloadTick }),
+          h(TreeSection, { rootRel: 'raw', label: 'raw · 素材（不可变）', cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, onUpload: upload, reloadTick }),
         ),
         h('div', { className: 'kb-main' },
           error && h('div', { className: 'kb-err' }, error),
