@@ -120,6 +120,28 @@ function extractJsonTail(text) {
 }
 
 /**
+ * 自动蒸馏设置补丁白名单清洗：只收六个已知键并夹取范围。
+ */
+function sanitizeAutoPatch(body) {
+  const out = {}
+  const b = body && typeof body === 'object' ? body : {}
+  if (typeof b.enabled === 'boolean') out.enabled = b.enabled
+  if (typeof b.provider === 'string') out.provider = b.provider.trim().slice(0, 120)
+  if (typeof b.model === 'string') out.model = b.model.trim().slice(0, 160)
+  const num = (v, lo, hi) => {
+    const n = Number(v)
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : undefined
+  }
+  const t = num(b.timeoutMin, 1, 240)
+  if (t !== undefined) out.timeoutMin = t
+  const a = num(b.maxAttempts, 1, 10)
+  if (a !== undefined) out.maxAttempts = a
+  const s = num(b.sweepSec, 15, 3600)
+  if (s !== undefined) out.sweepSec = s
+  return out
+}
+
+/**
  * 模型路由覆盖判定（dsh-smart-title 同语义）：provider+model 成对非空才生效；
  * 只填一个视为配置不完整（null），全空为未配置（null）。调用方拿到 null 时回退
  * 宿主 agentDefaultModel。
@@ -580,6 +602,6 @@ function createQueue({ root, ledgerFile, runner, logger = { info() {}, warn() {}
 module.exports = {
   createQueue, ExecutorUnavailableError, buildDistillPrompt, extractJsonTail,
   fingerprint, wikiSnapshot, diffWiki, collectWikiSources, splitMarkdown,
-  resolveRouteOverride,
+  resolveRouteOverride, sanitizeAutoPatch,
   RETRY_BASE_MS, DONE_KEEP, CHUNK_THRESHOLD, CHUNK_TARGET,
 }

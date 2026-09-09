@@ -266,6 +266,7 @@ module.exports = {
 
     // ── 设置（settings 服务缺席时退回 config/默认值） ──
     let settingsScope = null
+    const autoOverrides = {} // settings 服务缺席时 PUT /autodistill 的运行时兜底
     try {
       if (ctx.settings && typeof ctx.settings.register === 'function') {
         settingsScope = ctx.settings.register(AUTO_NS, autoSettingsSchema(), { base: { ...DEFAULT_AUTO, ...(config.autoDistill && typeof config.autoDistill === 'object' ? config.autoDistill : {}) } })
@@ -276,7 +277,7 @@ module.exports = {
     const readAuto = () => {
       let v = {}
       try { if (settingsScope && typeof settingsScope.get === 'function') v = settingsScope.get() || {} } catch { v = {} }
-      return { ...DEFAULT_AUTO, ...(config.autoDistill || {}), ...v }
+      return { ...DEFAULT_AUTO, ...(config.autoDistill || {}), ...autoOverrides, ...v }
     }
 
     // ── 队列（台账在知识库根之外：~/.dsh/dsh-kb/queue.json） ──
@@ -367,6 +368,27 @@ module.exports = {
                   : null
                 const snap = queue.snapshot()
                 sendJson(res, 200, { ok: true, enabled: cfg.enabled, route, ledger: ledgerFile, ...snap })
+                return
+              }
+              if (req.method === 'GET' && rest === '/autodistill') {
+                const cfg = readAuto()
+                const override = queueCore.resolveRouteOverride(cfg.provider, cfg.model)
+                let route = override
+                if (!route) {
+                  try { route = ctx.agentDefaultModel && ctx.agentDefaultModel.currentSelection() } catch { route = null }
+                }
+                route = route && route.provider && route.model
+                  ? { provider: route.provider, model: route.model, source: override ? 'override' : 'default' }
+                  : null
+                sendJson(res, 200, { ok: true, settings: cfg, route })
+                return
+              }
+              if (req.method === 'PUT' && rest === '/autodistill') {
+                const body = JSON.parse((await readBody(req)) || '{}')
+                const patch = queueCore.sanitizeAutoPatch(body)
+                if (settingsScope && typeof settingsScope.update === 'function') await settingsScope.update(patch)
+                else Object.assign(autoOverrides, patch)
+                sendJson(res, 200, { ok: true, settings: readAuto() })
                 return
               }
               if (req.method === 'POST' && rest === '/queue/pause') {

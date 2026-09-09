@@ -546,7 +546,7 @@ function QueueView(props) {
       `⚠️ 执行器不可用：${data.lastError || '稍后自动重试'}（排队条目会保留，配置好模型后自动继续）`),
     data.route ? h('div', { className: 'kb-q-model' },
       `⚙️ 蒸馏模型：${data.route.provider}/${data.route.model}`,
-      data.route.source === 'default' ? h('span', { className: 'kb-q-model-hint' }, '（跟随宿主默认，设置 → dsh-kb-autodistill 可指定）') : h('span', { className: 'kb-q-model-hint' }, '（设置中指定）'),
+      data.route.source === 'default' ? h('span', { className: 'kb-q-model-hint' }, '（跟随宿主默认，设置 → 知识库 可指定）') : h('span', { className: 'kb-q-model-hint' }, '（设置中指定）'),
     ) : null,
     data.enabled === false && h('div', { className: 'kb-q-banner' },
       '自动蒸馏已在设置中停用：素材仍会入队留档，但不会执行；可手动 @ 给 agent 加工。'),
@@ -603,6 +603,16 @@ function ensureKbComposerStyles() {
 .kbc-row .caret{width:14px;flex:none;border:0;background:transparent;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));cursor:pointer;font-size:10px;padding:0}
 .kbc-row .path{font-size:10.5px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))}
 .kbc-back{position:fixed;inset:0;z-index:2147483000}
+.kb-set-root{font-size:13px;color:var(--dsw-alias-label-primary,var(--dsw-text-primary,inherit));max-width:560px}
+.kb-set-field{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.kb-set-label{width:220px;flex:none;color:var(--dsw-alias-label-secondary,var(--dsw-text-secondary,inherit))}
+.kb-set-input{flex:1;min-width:0;padding:5px 10px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;font:inherit;font-size:12.5px}
+.kb-set-input:focus{outline:none;border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 50%,var(--dsw-alias-border-l2))}
+.kb-set-hint{font-size:11.5px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))}
+.kb-set-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:0 0 10px}
+.kb-set-grid .kb-set-field{flex-direction:column;align-items:flex-start;gap:4px;margin:0}
+.kb-set-grid .kb-set-label{width:auto}
+.kb-set-grid .kb-set-input{width:100%}
 `
   document.head.appendChild(style)
   kbComposerStyles = style
@@ -858,6 +868,62 @@ function mountKbSidebarEntry() {
   }
 }
 
+/** 设置页「知识库」区块：自动蒸馏开关与模型路由（GET/PUT /autodistill）。 */
+function KbSettingsSection() {
+  const h = React.createElement
+  React.useEffect(ensureKbComposerStyles, [])
+  const [st, setSt] = React.useState(null)
+  const [saving, setSaving] = React.useState(false)
+  const [msg, setMsg] = React.useState(null)
+  const [route, setRoute] = React.useState(null)
+
+  const load = () => {
+    fetch(`${API}/autodistill`).then(readJson).then((d) => {
+      setSt({ enabled: d.settings.enabled !== false, provider: d.settings.provider || '', model: d.settings.model || '', timeoutMin: d.settings.timeoutMin, maxAttempts: d.settings.maxAttempts, sweepSec: d.settings.sweepSec })
+      setRoute(d.route)
+    }).catch(() => setMsg('加载失败'))
+  }
+  React.useEffect(load, [])
+
+  const field = (label, key, type, hint) => h('label', { className: 'kb-set-field', key },
+    h('span', { className: 'kb-set-label' }, label),
+    type === 'check'
+      ? h('input', { type: 'checkbox', checked: st[key] === true, onChange: (e) => setSt((s) => ({ ...s, [key]: e.target.checked })) })
+      : h('input', { className: 'kb-set-input', type: type || 'text', value: st[key] == null ? '' : st[key], placeholder: hint || '', onChange: (e) => setSt((s) => ({ ...s, [key]: e.target.value })) }),
+    hint && type !== 'check' ? h('span', { className: 'kb-set-hint' }, hint) : null,
+  )
+
+  if (!st) return h('div', { className: 'kb-set-root' }, '加载中…')
+  const save = async () => {
+    setSaving(true)
+    try {
+      const d = await readJson(await fetch(`${API}/autodistill`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(st) }))
+      setSt({ enabled: d.settings.enabled !== false, provider: d.settings.provider || '', model: d.settings.model || '', timeoutMin: d.settings.timeoutMin, maxAttempts: d.settings.maxAttempts, sweepSec: d.settings.sweepSec })
+      setRoute(d.routeSource)
+      setMsg('✓ 已保存')
+    } catch (e) { setMsg('保存失败：' + ((e && e.message) || e)) }
+    setSaving(false)
+    setTimeout(() => setMsg(null), 2600)
+  }
+
+  return h('div', { className: 'kb-set-root' },
+    h('p', { className: 'kb-set-hint', style: { margin: '0 0 10px' } }, '上传到知识库 raw/ 的素材自动入队，由 bot 会话按 schema 蒸馏成文；进度见知识库页「蒸馏队列」。'),
+    field('启用自动蒸馏', 'enabled', 'check'),
+    field('Provider（留空=跟随宿主默认）', 'provider', 'text', '如 deepseek-official'),
+    field('Model（需与 Provider 成对填写）', 'model', 'text', '如 deepseek-v4-flash'),
+    h('div', { className: 'kb-set-grid' },
+      field('单条目超时（分钟）', 'timeoutMin', 'number'),
+      field('失败重试上限', 'maxAttempts', 'number'),
+      field('兜底扫描周期（秒）', 'sweepSec', 'number'),
+    ),
+    route ? h('div', { className: 'kb-set-hint' }, `当前生效：${route.provider}/${route.model}（${route.source === 'override' ? '设置指定' : '宿主默认'}）`) : null,
+    h('div', { style: { display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 } },
+      h('button', { className: 'kbc-chip', disabled: saving, onClick: save, style: saving ? { opacity: .6 } : null }, saving ? '保存中…' : '保存'),
+      msg ? h('span', { className: 'kb-set-hint' }, msg) : null,
+    ),
+  )
+}
+
 /** 全页知识库 overlay + 侧栏触发按钮。 */
 let kbOpen = null // 侧栏 DOM 入口 → 打开 overlay 的桥（KbPage 挂载时注册）
 function KbPage() {
@@ -1085,6 +1151,19 @@ module.exports = {
         ctx.effect(() => () => { disposeSidebar(); try { RDClient.createRoot(mount).unmount() } catch {} }, 'dsh-kb: sidebar entry')
       }
     } catch (e) { console.error('[dsh-kb] sidebar entry:', e) }
+
+    // 设置页「知识库」区块（自动蒸馏配置）
+    try {
+      ctx.slots.inject('settings.section', () => ctx.slots.register({
+        name: 'settings.section',
+        id: '@weibaohui/dsh-kb',
+        order: 65,
+        label: () => '知识库',
+        inject: () => ({}),
+      }, function KbSettingsSlot() {
+        return React.createElement(KbSettingsSection)
+      }))
+    } catch (e) { console.error('[dsh-kb] settings section inject:', e) }
 
     // 对话框「+ 知识库」按钮（composer 工具行）：动态 inject（静态列服务会拖住插件激活）
     try {
