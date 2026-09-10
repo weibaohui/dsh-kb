@@ -29,7 +29,7 @@ const core = require('./kb-core')
 const queueCore = require('./queue')
 
 const name = 'dsh-kb'
-const inject = ['webServer', 'agents', 'agentDefaultModel', 'sessions', 'settings']
+const inject = ['webServer', 'agents', 'agentDefaultModel', 'sessions', 'settings', 'llm']
 const API_PREFIX = '/dsh-kb/api'
 
 const AUTO_NS = 'dsh-kb-autodistill'
@@ -452,6 +452,24 @@ module.exports = {
                   : null
                 const snap = queue.snapshot()
                 sendJson(res, 200, { ok: true, enabled: cfg.enabled, route, ledger: ledgerFile, ...snap })
+                return
+              }
+              // GET /models — 设置页模型下拉的目录（llm.listProviders + 逐家 listModels；缺席降级空目录）
+              if (req.method === 'GET' && rest === '/models') {
+                const out = { default: null, providers: [] }
+                try {
+                  if (ctx.agentDefaultModel && typeof ctx.agentDefaultModel.currentSelection === 'function')
+                    out.default = ctx.agentDefaultModel.currentSelection()
+                } catch {}
+                try {
+                  const providers = ctx.llm && typeof ctx.llm.listProviders === 'function' ? ctx.llm.listProviders() : []
+                  for (const p of providers || []) {
+                    let models = []
+                    try { models = (await ctx.llm.listModels(p.id)) || [] } catch {}
+                    out.providers.push({ id: p.id, name: p.name || p.id, models: models.map((m) => ({ id: m.id, name: m.name || m.id })) })
+                  }
+                } catch {}
+                sendJson(res, 200, out)
                 return
               }
               if (req.method === 'GET' && rest === '/autodistill') {
