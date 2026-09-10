@@ -18,6 +18,14 @@ const API = '/dsh-kb/api'
 
 /** 客户端会话服务（apply 时 ctx.inject(['sessions']) 懒注入；缺席时「打开会话」降级提示）。 */
 let sessionsSvc = null
+let activeKbId = 'main' // 当前浏览的知识库（图片/下载链接按它取文件）
+let kbsCache = null
+async function fetchKbs(force) {
+  if (!force && kbsCache && Date.now() - kbsCache.at < 30000) return kbsCache.kbs
+  const d = await fetch(`${API}/kbs`).then(readJson).catch(() => null)
+  if (d && d.kbs) { kbsCache = { kbs: d.kbs, at: Date.now() }; return d.kbs }
+  return kbsCache ? kbsCache.kbs : null
+}
 
 const styles = {
   _head: null,
@@ -153,7 +161,7 @@ function normRel(href) {
 }
 
 function apiFile(rel, dl) {
-  return `${API}/file?path=${encodeURIComponent(rel)}${dl ? '&dl=1' : ''}`
+  return `${API}/file?path=${encodeURIComponent(rel)}${dl ? '&dl=1' : ''}&kb=${encodeURIComponent(activeKbId)}`
 }
 
 /** @绝对路径 → composer（先关 overlay；失败退化复制到剪贴板）。
@@ -321,7 +329,8 @@ function HitLine(props) {
 /** 懒加载目录树（一个根节点段，如 wiki / raw）。 */
 function TreeSection(props) {
   const h = React.createElement
-  const { rootRel, label, cur, onOpen, onAt, reloadTick } = props
+  const { rootRel, label, cur, onOpen, onAt, reloadTick, kb } = props
+  const KBQ = `&kb=${encodeURIComponent(kb || 'main')}`
   const [entries, setEntries] = React.useState(null)
   const [open, setOpen] = React.useState({})
   const [kids, setKids] = React.useState({})
@@ -329,7 +338,7 @@ function TreeSection(props) {
   React.useEffect(() => {
     let alive = true
     setEntries(null)
-    fetch(`${API}/tree?path=${encodeURIComponent(rootRel)}`)
+    fetch(`${API}/tree?path=${encodeURIComponent(rootRel)}${KBQ}`)
       .then(readJson)
       .then((d) => { if (alive) setEntries(d.entries || []) })
       .catch(() => { if (alive) setEntries([]) })
@@ -338,7 +347,7 @@ function TreeSection(props) {
 
   const loadDir = (rel) => {
     if (kids[rel]) return
-    fetch(`${API}/tree?path=${encodeURIComponent(rel)}`)
+    fetch(`${API}/tree?path=${encodeURIComponent(rel)}${KBQ}`)
       .then(readJson)
       .then((d) => setKids((k) => ({ ...k, [rel]: d.entries || [] })))
       .catch(() => setKids((k) => ({ ...k, [rel]: [] })))
@@ -394,12 +403,12 @@ function TreeSection(props) {
 /** 首页「最近更新」：读 log.md 尾部，wiki 路径可点直达。 */
 function RecentUpdates(props) {
   const h = React.createElement
-  const { onNav } = props
+  const { onNav, kb } = props
   const [items, setItems] = React.useState(null)
 
   React.useEffect(() => {
     let alive = true
-    fetch(`${API}/doc?path=${encodeURIComponent('log.md')}`)
+    fetch(`${API}/doc?path=${encodeURIComponent('log.md')}&kb=${encodeURIComponent(kb || 'main')}`)
       .then(readJson)
       .then((d) => {
         if (!alive) return
@@ -438,13 +447,13 @@ function RecentUpdates(props) {
 /** 右栏：文档阅读视图。 */
 function DocView(props) {
   const h = React.createElement
-  const { rel, root, onNav, onAt, reloadTick } = props
+  const { rel, root, onNav, onAt, reloadTick, kb } = props
   const [state, setState] = React.useState({ status: 'loading' })
 
   React.useEffect(() => {
     let alive = true
     setState({ status: 'loading' })
-    fetch(`${API}/doc?path=${encodeURIComponent(rel)}`)
+    fetch(`${API}/doc?path=${encodeURIComponent(rel)}&kb=${encodeURIComponent(kb || 'main')}`)
       .then(readJson)
       .then((d) => { if (alive) setState({ status: 'ok', doc: d.doc }) })
       .catch((e) => { if (alive) setState({ status: 'error', message: String((e && e.message) || e) }) })
@@ -475,7 +484,7 @@ function DocView(props) {
       ) : null,
     ),
     doc.kind === 'md' ? h('div', { className: 'kb-md' }, renderMarkdown(doc.body, onNav)) : null,
-    rel === 'index.md' ? h(RecentUpdates, { onNav }) : null,
+    rel === 'index.md' ? h(RecentUpdates, { onNav, kb: props.kb }) : null,
     doc.kind === 'text' ? h('pre', { className: 'kb-md-pre' }, doc.body) : null,
     doc.kind === 'binary' ? h('div', { className: 'kb-empty' }, '二进制/超大文件不支持在线阅读，可下载或 @ 给 agent 处理。') : null,
   )
@@ -484,13 +493,13 @@ function DocView(props) {
 /** 右栏：搜索结果视图。 */
 function SearchView(props) {
   const h = React.createElement
-  const { q, onNav, onAt } = props
+  const { q, onNav, onAt, kb } = props
   const [state, setState] = React.useState({ status: 'loading' })
 
   React.useEffect(() => {
     let alive = true
     setState({ status: 'loading' })
-    fetch(`${API}/search?q=${encodeURIComponent(q)}`)
+    fetch(`${API}/search?q=${encodeURIComponent(q)}&kb=${encodeURIComponent(kb || 'main')}`)
       .then(readJson)
       .then((d) => { if (alive) setState({ status: 'ok', data: d }) })
       .catch((e) => { if (alive) setState({ status: 'error', message: String((e && e.message) || e) }) })
@@ -526,7 +535,8 @@ function openKbSession(sessionId, hint) {
 /** 右栏：自动蒸馏队列视图（数据由 KbPage 统一轮询，这里只渲染+发起操作）。 */
 function QueueView(props) {
   const h = React.createElement
-  const { data, onAction, onNav, onHint } = props
+  const { data, kbs, onAction, onNav, onHint } = props
+  const kbName = (id) => { const k = (kbs || []).find((x) => x.id === (id || 'main')); return k ? k.name : (id || 'main') }
   if (!data) return h('div', { className: 'kb-spin' }, '读取队列…')
   const stats = data.stats || {}
   const statChips = ['running', 'queued', 'failed', 'done', 'skipped'].map((k) =>
@@ -559,7 +569,8 @@ function QueueView(props) {
           it.chunk ? h('span', { className: 'kb-q-time' }, `（片 ${it.chunk.idx}/${it.chunk.total}）`) : null,
           it.attempts > 1 ? h('span', { className: 'kb-q-time' }, `（第 ${it.attempts} 次）`) : null,
         ),
-        h('div', { className: 'kb-q-rel' }, it.rel),
+        h('div', { className: 'kb-q-rel' }, `[${
+          kbName(it.kbId)}] ${it.rel}`),
         it.note ? h('div', { className: `kb-q-note${it.status === 'failed' ? ' err' : ''}`, title: it.error || it.note }, it.note || it.error) : null,
         it.error && it.note ? h('div', { className: 'kb-q-note err', title: it.error }, it.error) : null,
       ),
@@ -643,61 +654,84 @@ async function fetchKbRoot() {
   return root
 }
 
-/** 知识库目录选择浮层：目录=锚定上下文，文件=@引用；整行可点，caret 展开。 */
+/** 知识库目录选择浮层：多库——每个库一节（素材库给 raw/wiki，产出库列根目录）；
+ *  点目录/文件一律 @绝对路径 插入。基础行每渲染从 props 推导，懒加载子行存 map。 */
 function KbDirPicker(props) {
   const h = React.createElement
-  const { root, anchor, onPick, onClose } = props
-  const [rows, setRows] = React.useState(() => ([
-    { rel: '', name: '📚 整个知识库', depth: 0, kind: 'root' },
-    { rel: 'raw', name: 'raw · 原始素材', depth: 0, kind: 'dir', expandable: true },
-    { rel: 'wiki', name: 'wiki · 成文知识', depth: 0, kind: 'dir', expandable: true },
-  ]))
+  const { kbs, anchor, onPick } = props
   const [expanded, setExpanded] = React.useState({})
+  const [children, setChildren] = React.useState({}) // 'kbId|rel' → 子行
   const [err, setErr] = React.useState(null)
 
-  const loadKids = (rel) => {
-    fetch(`${API}/tree?path=${encodeURIComponent(rel)}`)
+  const loadKids = (row) => {
+    const key = row.kbId + '|' + row.rel
+    if (children[key]) return
+    fetch(`${API}/tree?kb=${encodeURIComponent(row.kbId)}&path=${encodeURIComponent(row.rel)}`)
       .then(readJson)
       .then((d) => {
-        const depth = rel.split('/').length
+        const depth = row.depth + 1
         const kids = (d.entries || []).map((e) => ({
-          rel: rel + '/' + e.name, name: e.name, depth,
-          kind: e.type === 'dir' ? 'dir' : 'file', expandable: e.type === 'dir',
+          kbId: row.kbId, rel: row.rel ? row.rel + '/' + e.name : e.name,
+          name: (e.type === 'dir' ? '📁 ' : '📄 ') + e.name, depth,
+          kind: 'dir', expandable: e.type === 'dir',
         }))
-        setRows((rs) => {
-          const idx = rs.findIndex((r) => r.rel === rel)
-          if (idx < 0) return rs
-          return [...rs.slice(0, idx + 1), ...kids, ...rs.slice(idx + 1)]
-        })
+        setChildren((c) => ({ ...c, [key]: kids }))
       })
       .catch((e) => setErr(String((e && e.message) || e)))
   }
 
   const toggle = (row) => {
-    if (expanded[row.rel]) { setExpanded((x) => ({ ...x, [row.rel]: false })); return }
-    setExpanded((x) => ({ ...x, [row.rel]: true }))
-    loadKids(row.rel)
+    const key = row.kbId + '|' + row.rel
+    setExpanded((x) => ({ ...x, [key]: !x[key] }))
+    loadKids(row)
   }
 
-  const rowsView = rows.map((r) => h('div', {
-    className: 'kbc-row', key: r.rel || 'root', style: { paddingLeft: 8 + r.depth * 14 },
-    onClick: () => onPick({ abs: r.rel ? root.replace(/\/+$/, '') + '/' + r.rel : root.replace(/\/+$/, ''), kind: r.kind }),
-  },
-    r.expandable
-      ? h('button', { className: 'caret', 'aria-label': '展开', onClick: (e) => { e.stopPropagation(); toggle(r) } }, expanded[r.rel] ? '▾' : '▸')
-      : h('span', { className: 'caret' }),
-    h('span', { className: 'nm' }, (r.kind === 'file' ? '📄 ' : '') + r.name),
-  ))
+  const visible = []
+  const walk = (kbId, rel, name, depth) => {
+    visible.push({ kbId, rel, name, depth })
+    const key = kbId + '|' + rel
+    if (expanded[key] !== true) return
+    for (const c of (children[key] || [])) walk(c.kbId, c.rel, c.name, depth + 1)
+  }
+  for (const k of (kbs || [])) {
+    walk(k.id, '', `📚 ${k.name}`, 0)
+    if (k.kind === 'material' && expanded[k.id + '|raw'] === true) {
+      // raw/wiki 伪目录：展开时从 loadKids 的缓存取
+      walk(k.id, 'raw', 'raw · 原始素材', 1)
+    }
+    if (k.kind === 'material' && expanded[k.id + '|wiki'] === true) {
+      walk(k.id, 'wiki', 'wiki · 成文知识', 1)
+    }
+  }
+
+  const rowsView = visible.map((r, i) => {
+    const key = r.kbId + '|' + r.rel
+    const expandable = r.rel === '' || r.rel === 'raw' || r.rel === 'wiki' || (children[key] || []).some((c) => c.expandable) || (children[key] === undefined && r.depth >= 1)
+    return h('div', {
+      className: 'kbc-row', key: key + i, style: { paddingLeft: 8 + r.depth * 14 },
+      onClick: () => {
+        const k = (kbs || []).find((x) => x.id === r.kbId)
+        if (!k) return
+        const abs = r.rel ? k.root.replace(/\/+$/, '') + '/' + r.rel : k.root.replace(/\/+$/, '')
+        onPick({ abs })
+      },
+    },
+      expandable
+        ? h('button', { className: 'caret', 'aria-label': '展开', onClick: (e) => { e.stopPropagation(); toggle({ kbId: r.kbId, rel: r.rel }) } }, expanded[key] ? '▾' : '▸')
+        : h('span', { className: 'caret' }),
+      h('span', { className: 'nm' }, r.name),
+    )
+  })
 
   const winW = typeof window !== 'undefined' ? window.innerWidth : 1280
   const winH = typeof window !== 'undefined' ? window.innerHeight : 800
   const style = {
     left: Math.max(8, Math.min(anchor.left, winW - 336)),
     bottom: Math.max(8, winH - anchor.top + 6),
-    maxHeight: Math.max(180, Math.min(360, anchor.top - 20)),
+    maxHeight: Math.max(180, Math.min(380, anchor.top - 20)),
   }
   return h('div', { className: 'kbc-pop', style, role: 'dialog' },
-    h('div', { className: 'kbc-pop-h' }, '选择要 @ 的知识库目录或文件'),
+    h('div', { className: 'kbc-pop-h' }, '选择知识库目录或文件（@ 引用）'),
     err && h('div', { className: 'kbc-pop-h' }, '加载失败：' + err),
     rowsView,
   )
@@ -732,7 +766,7 @@ function KbComposerButtonSlot(props) {
   const h = React.createElement
   React.useEffect(ensureKbComposerStyles, [])
   const [picker, setPicker] = React.useState(null)
-  const [root, setRoot] = React.useState(null)
+  const [kbs, setKbs] = React.useState([])
   const [msg, setMsg] = React.useState(null)
   const btnRef = React.useRef(null)
   const liveInput = React.useRef(props.input)
@@ -745,7 +779,7 @@ function KbComposerButtonSlot(props) {
     let anchor = { left: 16, top: 400 }
     try { if (btnRef.current) anchor = btnRef.current.getBoundingClientRect() } catch {}
     setPicker(anchor)
-    fetchKbRoot().then((r) => setRoot(r || '/Users/mac/.dsh/kb'))
+    fetchKbs(true).then((list) => setKbs(list || []))
   }
   const pick = (target) => {
     const text = `@${target.abs} `
@@ -762,7 +796,7 @@ function KbComposerButtonSlot(props) {
     } catch {}
   }
   const popover = picker !== null && RDP && typeof RDP.createPortal === 'function'
-    ? RDP.createPortal(h(KbDirPicker, { root: root || '', anchor: picker, onPick: pick, onClose: close }), document.body)
+    ? RDP.createPortal(h(KbDirPicker, { kbs, anchor: picker, onPick: pick, onClose: close }), document.body)
     : null
   return h(React.Fragment, null,
     h('button', {
@@ -941,6 +975,10 @@ function KbPage() {
   const [reloadTick, setReloadTick] = React.useState(0)
   const [uploadTick, setUploadTick] = React.useState(0)
   const [queueData, setQueueData] = React.useState(null)
+  const [kbs, setKbs] = React.useState(null)
+  const [kbId, setKbId] = React.useState('main')
+  const [adding, setAdding] = React.useState(null) // null | {name, root, kind}
+  const [busy, setBusy] = React.useState(false)
 
   const fetchQueue = () => {
     fetch(`${API}/queue`)
@@ -972,15 +1010,16 @@ function KbPage() {
 
   const refresh = () => {
     setError(null)
-    fetch(`${API}/status`)
+    fetch(`${API}/status?kb=${encodeURIComponent(kbId)}`)
       .then(readJson)
       .then((s) => { setStatus(s); setReloadTick((t) => t + 1) })
       .catch((e) => setError(String((e && e.message) || e)))
   }
 
   React.useEffect(() => {
-    if (open) refresh()
-  }, [open])
+    if (open) { refresh(); fetchKbs(true).then((l) => setKbs(l || [])) }
+  }, [open, kbId])
+  React.useEffect(() => { activeKbId = kbId }, [kbId])
 
   React.useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape' && open && !(e.isComposing === true)) setOpen(false) }
@@ -1009,12 +1048,14 @@ function KbPage() {
 
   const upload = async (dir, files) => {
     if (!files || !files.length) return
+    const cur = (kbs || []).find((k) => k.id === kbId)
+    if (cur && cur.kind !== 'material') { showHint('产出库只读，不支持上传'); return }
     setError(null)
     const list = Array.from(files)
     let okCount = 0
     for (const f of list) {
       try {
-        await readJson(await fetch(`${API}/upload?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f }))
+        await readJson(await fetch(`${API}/upload?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(f.name)}&kb=${encodeURIComponent(kbId)}`, { method: 'POST', body: f }))
         okCount++
       } catch (e) {
         setError(`上传 ${f.name} 失败：${(e && e.message) || e}`)
@@ -1023,6 +1064,38 @@ function KbPage() {
     if (okCount) showHint(`已上传 ${okCount} 个素材到 ${dir}/ · 自动蒸馏已入队 ⚗️`)
     setUploadTick((t) => t + 1)
     setReloadTick((t) => t + 1)
+    fetchKbs(true).then((l) => setKbs(l || []))
+  }
+
+  // ── 多库管理 ──
+  const delKb = async (k) => {
+    if (!window.confirm(`移除知识库「${k.name}」？磁盘数据不受影响。`)) return
+    try {
+      await readJson(await fetch(`${API}/kb/delete`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: k.id }) }))
+      fetchKbs(true).then((l) => setKbs(l || []))
+      if (kbId === k.id) setKbId('main')
+      setReloadTick((t) => t + 1)
+      showHint(`已移除「${k.name}」`)
+    } catch (e) { showHint('移除失败：' + ((e && e.message) || e)) }
+  }
+  const toggleDistill = async (k) => {
+    try {
+      await readJson(await fetch(`${API}/kb/update`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: k.id, distillEnabled: k.distillEnabled === false }) }))
+      fetchKbs(true).then((l) => setKbs(l || []))
+    } catch (e) { showHint('操作失败：' + ((e && e.message) || e)) }
+  }
+  const addKb = async () => {
+    if (!adding) return
+    setBusy(true)
+    try {
+      const d = await readJson(await fetch(`${API}/kb`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(adding) }))
+      setAdding(null)
+      fetchKbs(true).then((l) => setKbs(l || []))
+      setKbId(d.kb.id)
+      setReloadTick((t) => t + 1)
+      showHint(`已添加「${d.kb.name}」`)
+    } catch (e) { showHint('添加失败：' + ((e && e.message) || e)) }
+    setBusy(false)
   }
 
   // 上传目标目录：正在看 raw/ 下文档时传其所在目录，否则 raw/ 根
@@ -1087,7 +1160,7 @@ function KbPage() {
       onDragEnter, onDragOver, onDragLeave, onDrop,
     },
       h('div', { className: 'kb-head' },
-        h('p', { className: 'kb-title' }, '📚 知识库', counts),
+        h('p', { className: 'kb-title' }, '📚 ', (kbs || []).find((k) => k.id === kbId)?.name || '知识库', counts),
         h('input', {
           className: 'kb-search', placeholder: '全文搜索（Enter）…', value: query,
           onChange: (e) => setQuery(e.target.value),
@@ -1106,18 +1179,47 @@ function KbPage() {
       ),
       h('div', { className: 'kb-body' },
         h('div', { className: 'kb-side' },
+          h('div', { className: 'kb-side-h' }, '知识库',
+            h('button', { title: adding ? '取消添加' : '添加知识库（素材库可自动蒸馏；产出库只读）', onClick: () => setAdding(adding ? null : { name: '', root: '', kind: 'material', distillEnabled: true }) }, adding ? '× 取消' : '＋ 添加'),
+          ),
+          (kbs || []).map((k) => h('div', { key: k.id, style: { display: 'flex', alignItems: 'center', gap: 2 } },
+            h('button', {
+              className: 'kb-item', 'data-cur': k.id === kbId, style: { flex: 1, minWidth: 0 }, title: k.root,
+              onClick: () => { setKbId(k.id); setNav({ kind: 'doc', rel: 'index.md' }) },
+            },
+              h('span', null, k.kind === 'produced' ? '📁' : '📚'),
+              h('span', { className: 'nm' }, k.name),
+              k.counts ? h('span', { className: 'kb-counts' }, `${k.counts.wiki}|${k.counts.raw}`) : null,
+            ),
+            k.kind === 'material' && k.id !== 'main' ? h('button', {
+              className: 'at', title: k.distillEnabled === false ? '蒸馏已关，点击开启' : '蒸馏已开，点击关闭',
+              style: { color: k.distillEnabled === false ? 'var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))' : 'var(--dsw-alias-brand-primary)' },
+              onClick: (e) => { e.stopPropagation(); toggleDistill(k) },
+            }, '蒸') : null,
+            k.id !== 'main' ? h('button', { className: 'at', title: '移除该知识库（不删数据）', onClick: (e) => { e.stopPropagation(); delKb(k) } }, '✕') : null,
+          )),
+          adding ? h('div', { style: { border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, padding: 8, margin: '4px 0 8px', display: 'grid', gap: 6 } },
+            h('input', { className: 'kb-search', style: { width: '100%' }, placeholder: '名称（默认取目录名）', value: adding.name, onChange: (e) => setAdding((a) => ({ ...a, name: e.target.value })) }),
+            h('input', { className: 'kb-search', style: { width: '100%' }, placeholder: '文件夹绝对路径（如 /data/docs）', value: adding.root, onChange: (e) => setAdding((a) => ({ ...a, root: e.target.value })) }),
+            h('label', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
+              h('input', { type: 'checkbox', checked: adding.kind === 'material', onChange: (e) => setAdding((a) => ({ ...a, kind: e.target.checked ? 'material' : 'produced' })) }),
+              '素材库（建骨架并可自动蒸馏；产出库只读）',
+            ),
+            h('button', { className: 'kb-btn primary', disabled: busy || !adding.root.trim(), onClick: addKb }, busy ? '添加中…' : '添加'),
+            h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))' } }, '注意：添加后该目录将可经局域网 API 浏览/上传。'),
+          ) : null,
           quick('index.md', '目录', '📖'),
           quick('log.md', '操作流水', '🧾'),
           quick('schema.md', 'KB 约定', '📐'),
           queueEntry,
-          h(TreeSection, { rootRel: 'wiki', label: 'wiki · 成文知识', cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, reloadTick }),
-          h(TreeSection, { rootRel: 'raw', label: 'raw · 素材（不可变）', cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, onUpload: upload, reloadTick }),
+          h(TreeSection, { rootRel: 'wiki', label: 'wiki · 成文知识', kb: kbId, cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, reloadTick }),
+          h(TreeSection, { rootRel: 'raw', label: 'raw · 素材（不可变）', kb: kbId, cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, onUpload: upload, reloadTick }),
         ),
         h('div', { className: 'kb-main' },
           error && h('div', { className: 'kb-err' }, error),
-          !error && nav.kind === 'doc' && h(DocView, { rel: nav.rel, root: status && status.root, onNav, onAt: atRel, onUpload: upload, reloadTick, uploadTick }),
-          !error && nav.kind === 'search' && h(SearchView, { q: nav.q, onNav, onAt: atRel }),
-          !error && nav.kind === 'queue' && h(QueueView, { data: queueData, onAction: queueAction, onNav, onHint: showHint }),
+          !error && nav.kind === 'doc' && h(DocView, { rel: nav.rel, root: status && status.root, kb: kbId, onNav, onAt: atRel, onUpload: upload, reloadTick, uploadTick }),
+          !error && nav.kind === 'search' && h(SearchView, { q: nav.q, kb: kbId, onNav, onAt: atRel }),
+          !error && nav.kind === 'queue' && h(QueueView, { data: queueData, kbs, onAction: queueAction, onNav, onHint: showHint }),
         ),
       ),
     ),

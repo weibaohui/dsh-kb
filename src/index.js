@@ -105,7 +105,8 @@ function debounce(fn, ms) {
  * 返回 { tail }（模型可见回复全文，供 JSON 尾协议解析）；pages 由队列统一验证。
  */
 function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
-  return async function run(item, { signal }) {
+  return async function run(item, { signal, root: itemRoot }) {
+    const kbRoot = itemRoot || rootAbs
     const agents = ctx.agents
     const adm = ctx.agentDefaultModel
     if (!agents || typeof agents.create !== 'function' || !adm || typeof adm.currentSelection !== 'function') {
@@ -125,7 +126,7 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
     try {
       const created = await agents.create({
         sessionId,
-        meta: { cwd: rootAbs },
+        meta: { cwd: kbRoot },
         agentOptions: { provider: selection.provider, model: selection.model },
         // 关键：meta.agentPreset 只是会话头标签，不带任何工具——没有 preset mount
         // 的会话一个工具都没有，模型只能干说「我无法执行命令」（真机抓过）。
@@ -214,7 +215,7 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
       agent.followup({
         id: randomUUID(),
         role: 'user',
-        content: [{ type: 'text', text: queueCore.buildDistillPrompt(item) }],
+        content: [{ type: 'text', text: queueCore.buildDistillPrompt(item, kbRoot) }],
         source: { kind: 'plugin', plugin: 'dsh-kb' },
       })
       logger.info(`dsh-kb: [${item.id}] followup 已发，等 whenIdle…`)
@@ -264,6 +265,15 @@ module.exports = {
     }
     const rootAbs = path.resolve(root)
 
+    // ── 多知识库注册表（主库隐式；added 持久化在 ~/.dsh/dsh-kb/kbs.json） ──
+    const registryFile = join(dshHome(), 'dsh-kb', 'kbs.json')
+    const addedKbs = core.loadKbRegistry(registryFile).kbs
+    const persistRegistry = () => core.saveKbRegistry(registryFile, { version: core.REGISTRY_VERSION, kbs: addedKbs })
+    const MAIN_KB = { id: 'main', name: '主库', root: rootAbs, kind: 'material', distillEnabled: true }
+    const allKbs = () => [MAIN_KB, ...addedKbs]
+    const resolveKb = (kbId) => allKbs().find((k) => k.id === (kbId || 'main')) || null
+    const distillTargets = () => allKbs().filter((k) => k.kind === 'material' && k.distillEnabled !== false)
+
     // ── 设置（settings 服务缺席时退回 config/默认值） ──
     let settingsScope = null
     const autoOverrides = {} // settings 服务缺席时 PUT /autodistill 的运行时兜底
@@ -284,28 +294,42 @@ module.exports = {
     const ledgerFile = join(dshHome(), 'dsh-kb', 'queue.json')
     const queue = queueCore.createQueue({
       root: rootAbs,
+      rootOf: (kbId) => {
+        const k = resolveKb(kbId)
+        return k ? k.root : null
+      },
       ledgerFile,
-      runner: createAgentRunner({ ctx, rootAbs, readAuto, logger }),
+      runner: createAgentRunner({ ctx, rootAbs, readAuto, logger }),  // runner 内部按 item.kbId 取根
       logger,
       getLimits: () => { const a = readAuto(); return { timeoutMs: a.timeoutMin * 60 * 1000, maxAttempts: a.maxAttempts } },
       isPaused: () => readAuto().enabled !== true,
     })
     queue.resume()
-    try { queue.scan() } catch (e) { logger.warn(`dsh-kb: 启动扫描失败：${(e && e.message) || e}`) }
+    try { for (const k of distillTargets()) queue.scan(k.id) } catch (e) { logger.warn(`dsh-kb: 启动扫描失败：${(e && e.message) || e}`) }
     queue.kick()
 
-    // raw/ 监视（200ms 防抖）+ 周期兜底扫描；watcher 不可靠的文件系统由 sweep 覆盖
-    try {
-      const rawDir = join(rootAbs, core.RAW_DIR)
-      fs.mkdirSync(rawDir, { recursive: true })
-      const rescan = debounce(() => { try { queue.scan() } catch { /* sweep 兜底 */ } }, 200)
-      const watcher = fs.watch(rawDir, { recursive: true }, rescan)
-      ctx.effect(() => () => { try { watcher.close() } catch {} }, 'dsh-kb: raw watcher')
-    } catch (e) { logger.warn(`dsh-kb: raw/ 监视不可用（兜底扫描覆盖）：${(e && e.message) || e}`) }
+    // raw/ 监视（200ms 防抖）：主库 + 每个素材库各一个；watcher 不可靠的文件系统由 sweep 覆盖
+    const kbWatchers = new Map() // kbId → fs.Watcher
+    const watchKb = (kb) => {
+      if (kbWatchers.has(kb.id) || kb.kind !== 'material' || kb.distillEnabled === false) return
+      try {
+        const rawDir = join(kb.root, core.RAW_DIR)
+        fs.mkdirSync(rawDir, { recursive: true })
+        const rescan = debounce(() => { try { queue.scan(kb.id) } catch { /* sweep 兜底 */ } }, 200)
+        kbWatchers.set(kb.id, fs.watch(rawDir, { recursive: true }, rescan))
+      } catch (e) { logger.warn(`dsh-kb: ${kb.name} raw/ 监视不可用（兜底扫描覆盖）：${(e && e.message) || e}`) }
+    }
+    const unwatchKb = (kbId) => {
+      const w = kbWatchers.get(kbId)
+      if (w) { try { w.close() } catch {} kbWatchers.delete(kbId) }
+    }
+    watchKb(MAIN_KB)
+    for (const k of addedKbs) watchKb(k)
+    ctx.effect(() => () => { for (const w of kbWatchers.values()) { try { w.close() } catch {} } }, 'dsh-kb: raw watchers')
 
     let sweepTimer = null
     const sweep = () => {
-      try { queue.scan(); queue.kick() } catch { /* 下一轮再试 */ }
+      try { for (const k of distillTargets()) queue.scan(k.id); queue.kick() } catch { /* 下一轮再试 */ }
       const sec = Math.max(15, Number(readAuto().sweepSec) || 60)
       sweepTimer = setTimeout(sweep, sec * 1000)
       if (typeof sweepTimer.unref === 'function') sweepTimer.unref()
@@ -328,31 +352,91 @@ module.exports = {
               const rest = p.slice(API_PREFIX.length) || '/'
               const q = url.searchParams
 
+              // 多知识库：可选 ?kb=<id>（缺省主库）；未知 id 一律 400
+              const kb = resolveKb(q.get('kb'))
+              if (!kb) { sendJson(res, 400, { ok: false, error: '未知知识库' }); return }
+
               if (req.method === 'GET' && (rest === '/' || rest === '/status')) {
-                sendJson(res, 200, core.statusPayload(root))
+                sendJson(res, 200, { ...core.statusPayload(kb.root), kb: { id: kb.id, name: kb.name, kind: kb.kind } })
                 return
               }
               if (req.method === 'GET' && rest === '/tree') {
-                sendJson(res, 200, { ok: true, dir: (q.get('path') || ''), entries: core.listDir(root, q.get('path') || '') })
+                sendJson(res, 200, { ok: true, dir: (q.get('path') || ''), entries: core.listDir(kb.root, q.get('path') || '') })
                 return
               }
               if (req.method === 'GET' && rest === '/doc') {
-                sendJson(res, 200, { ok: true, doc: core.readDoc(root, q.get('path') || '') })
+                sendJson(res, 200, { ok: true, doc: core.readDoc(kb.root, q.get('path') || '') })
                 return
               }
               if (req.method === 'GET' && rest === '/file') {
-                core.sendFile(res, root, q.get('path') || '', q.get('dl') === '1')
+                core.sendFile(res, kb.root, q.get('path') || '', q.get('dl') === '1')
                 return
               }
               if (req.method === 'GET' && rest === '/search') {
-                const result = await core.search(root, q.get('q') || '')
+                const result = await core.search(kb.root, q.get('q') || '')
                 sendJson(res, 200, { ok: true, ...result })
                 return
               }
               if (req.method === 'POST' && rest === '/upload') {
-                const result = await core.uploadRaw(req, root, q.get('dir') || core.RAW_DIR, q.get('name') || '')
-                try { queue.offer(`${result.dir}/${result.name}`) } catch (e) { logger.warn(`dsh-kb: 入队失败：${(e && e.message) || e}`) }
+                if (kb.kind !== 'material') { sendJson(res, 403, { ok: false, error: '产出库只读，不支持上传' }); return }
+                const result = await core.uploadRaw(req, kb.root, q.get('dir') || core.RAW_DIR, q.get('name') || '')
+                try { queue.offer(`${result.dir}/${result.name}`, kb.id) } catch (e) { logger.warn(`dsh-kb: 入队失败：${(e && e.message) || e}`) }
                 sendJson(res, 201, { ok: true, ...result })
+                return
+              }
+              // ── 多知识库管理 ──
+              if (req.method === 'GET' && rest === '/kbs') {
+                const kbs = allKbs().map((k) => ({
+                  id: k.id, name: k.name, root: k.root, kind: k.kind || 'material', distillEnabled: k.distillEnabled !== false,
+                  counts: core.statusPayload(k.root).counts,
+                }))
+                sendJson(res, 200, { ok: true, kbs })
+                return
+              }
+              if (req.method === 'POST' && rest === '/kb') {
+                const body = JSON.parse((await readBody(req)) || '{}')
+                const check = core.normalizeKbRoot(body.root, os.homedir())
+                if (!check.ok) throw new core.KbError(400, check.error)
+                const kind = body.kind === 'produced' ? 'produced' : 'material'
+                if (allKbs().some((k) => core.kbRootsOverlap(k.root, check.abs))) throw new core.KbError(400, '与已有知识库目录重叠')
+                const entry = {
+                  id: core.newKbId(),
+                  name: String(body.name || '').trim().slice(0, 60) || path.basename(check.abs),
+                  root: check.abs, kind,
+                  distillEnabled: body.distillEnabled !== false,
+                  createdAt: new Date().toISOString(),
+                }
+                addedKbs.push(entry)
+                persistRegistry()
+                if (entry.kind === 'material') {
+                  try { core.bootstrap(entry.root, logger) } catch (e) { logger.warn(`dsh-kb: 新库骨架自举失败：${(e && e.message) || e}`) }
+                  watchKb(entry)
+                  try { queue.scan(entry.id) } catch {}
+                }
+                sendJson(res, 201, { ok: true, kb: entry })
+                return
+              }
+              if (req.method === 'POST' && rest === '/kb/delete') {
+                const body = JSON.parse((await readBody(req)) || '{}')
+                const idx = addedKbs.findIndex((k) => k.id === body.id)
+                if (idx < 0) throw new core.KbError(404, '知识库不存在或不可删除')
+                const [gone] = addedKbs.splice(idx, 1)
+                persistRegistry()
+                unwatchKb(gone.id)
+                try { for (const it of queue.snapshot().items) if ((it.kbId || 'main') === gone.id && (it.status === 'queued')) queue.cancel(it.id) } catch {}
+                sendJson(res, 200, { ok: true, id: gone.id })
+                return
+              }
+              if (req.method === 'POST' && rest === '/kb/update') {
+                const body = JSON.parse((await readBody(req)) || '{}')
+                const k = addedKbs.find((x) => x.id === body.id)
+                if (!k) throw new core.KbError(404, '知识库不存在或不可修改')
+                if (typeof body.name === 'string' && body.name.trim()) k.name = body.name.trim().slice(0, 60)
+                if (typeof body.distillEnabled === 'boolean') k.distillEnabled = body.distillEnabled
+                persistRegistry()
+                if (k.distillEnabled === false) unwatchKb(k.id)
+                else { watchKb(k); try { queue.scan(k.id) } catch {} }
+                sendJson(res, 200, { ok: true, kb: k })
                 return
               }
               // ── 自动蒸馏队列 ──

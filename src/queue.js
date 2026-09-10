@@ -154,12 +154,13 @@ function resolveRouteOverride(provider, model) {
 }
 
 /** 蒸馏 prompt（自包含，不依赖会话上下文；规则与 schema.md 一致）。 */
-function buildDistillPrompt(item) {
+function buildDistillPrompt(item, rootAbs) {
   const head = item.chunk
     ? `素材：${item.rel} 的第 ${item.chunk.idx}/${item.chunk.total} 片，本片内容在文件：${item.chunk.file}（只加工本片；其余片由其他会话处理）`
     : `素材：${item.rel}`
   return [
     '你是 dsh-kb 的自动加工 bot（author 固定写 kb-bot）。知识库根目录下的素材需要你按知识库约定加工成文。',
+    `知识库根目录：${rootAbs || '(未知)'}`,
     '',
     head,
     '',
@@ -227,9 +228,15 @@ function splitMarkdown(text, target = CHUNK_TARGET, maxParts = CHUNK_MAX_ITEMS) 
 }
 
 /** 工厂：创建队列实例。runner(item, {signal}) => Promise<{pages?, summary?, tail?}>。 */
-function createQueue({ root, ledgerFile, runner, logger = { info() {}, warn() {}, error() {} }, getLimits, isPaused }) {
-  const rootAbs = core.ensureRoot(root)
+function createQueue({ root, rootOf, ledgerFile, runner, logger = { info() {}, warn() {}, error() {} }, getLimits, isPaused }) {
+  const rootAbs = root ? core.ensureRoot(root) : null
+  if (!rootAbs && typeof rootOf !== 'function') throw new TypeError('root or rootOf required')
   if (typeof runner !== 'function') throw new TypeError('runner required')
+  // kbId → 该库根目录；缺省/main 回落构造参数 root
+  const rootFor = (kbId) => {
+    if (!kbId || kbId === 'main') return rootAbs || (typeof rootOf === 'function' ? rootOf(kbId) : null)
+    return typeof rootOf === 'function' ? rootOf(kbId) : null
+  }
 
   const limits = () => {
     const l = (typeof getLimits === 'function' && getLimits()) || {}
@@ -291,12 +298,16 @@ function createQueue({ root, ledgerFile, runner, logger = { info() {}, warn() {}
   }
 
   const byId = (id) => items.find((it) => it.id === id) || null
-  const latestByRel = (rel) => { for (let i = items.length - 1; i >= 0; i--) if (items[i].rel === rel) return items[i]; return null }
+  const latestByRel = (rel, kbId) => {
+    const kb = kbId || 'main'
+    for (let i = items.length - 1; i >= 0; i--) if (items[i].rel === rel && (items[i].kbId || 'main') === kb) return items[i]
+    return null
+  }
 
   // ── 入队 ────────────────────────────────────────────────
-  function addItem(rel, fp, extra) {
+  function addItem(rel, fp, extra, kbId) {
     const item = {
-      id: newItemId(), rel, size: fp.size, mtime: fp.mtime, hash: fp.hash,
+      id: newItemId(), rel, kbId: kbId || 'main', size: fp.size, mtime: fp.mtime, hash: fp.hash,
       status: 'queued', attempts: 0, enqueuedAt: nowIso(),
       startedAt: null, finishedAt: null, sessionId: null, pages: [], note: '', error: null,
     }
@@ -308,39 +319,42 @@ function createQueue({ root, ledgerFile, runner, logger = { info() {}, warn() {}
   const chunksDir = path.join(path.dirname(ledgerFile), 'chunks')
 
   /** 超大素材分片落盘（分片文件放插件台账区，不进知识库根），并逐片入队。返回入队条数。 */
-  function admit(rel, fp) {
-    const abs = path.join(rootAbs, ...rel.split('/'))
+  function admit(rel, fp, kbId) {
+    const kbRoot = rootFor(kbId)
+    const abs = path.join(kbRoot, ...rel.split('/'))
     const ext = path.extname(abs).slice(1).toLowerCase()
-    if (fp.size <= CHUNK_THRESHOLD || !core.TEXT_EXT.has(ext)) return addItem(rel, fp) && 1
+    if (fp.size <= CHUNK_THRESHOLD || !core.TEXT_EXT.has(ext)) return addItem(rel, fp, null, kbId) && 1
     let text
-    try { text = fs.readFileSync(abs, 'utf8') } catch { return addItem(rel, fp) && 1 }
+    try { text = fs.readFileSync(abs, 'utf8') } catch { return addItem(rel, fp, null, kbId) && 1 }
     const parts = splitMarkdown(text)
-    const relHash = crypto.createHash('sha256').update(rel).digest('hex').slice(0, 8)
+    const relHash = crypto.createHash('sha256').update(kbId + '|' + rel).digest('hex').slice(0, 8)
+    const kbChunks = path.join(chunksDir, kbId || 'main')
     const dirName = relHash + '-' + fp.hash.slice(7, 15)
-    const dir = path.join(chunksDir, dirName)
+    const dir = path.join(kbChunks, dirName)
     try {
-      fs.mkdirSync(chunksDir, { recursive: true })
-      for (const d of fs.readdirSync(chunksDir)) {
-        if (d.startsWith(relHash + '-') && d !== dirName) fs.rmSync(path.join(chunksDir, d), { recursive: true, force: true })
+      fs.mkdirSync(kbChunks, { recursive: true })
+      for (const d of fs.readdirSync(kbChunks)) {
+        if (d.startsWith(relHash + '-') && d !== dirName) fs.rmSync(path.join(kbChunks, d), { recursive: true, force: true })
       }
       fs.mkdirSync(dir, { recursive: true })
       const width = String(parts.length).length
       parts.forEach((p, i) => {
         const file = path.join(dir, String(i + 1).padStart(width, '0') + '.md')
         fs.writeFileSync(file, p.body, 'utf8')
-        addItem(rel, fp, { chunk: { idx: i + 1, total: parts.length, file } })
+        addItem(rel, fp, { chunk: { idx: i + 1, total: parts.length, file } }, kbId)
       })
     } catch (e) {
       logger.warn(`dsh-kb: 分片落盘失败，整文件入队：${(e && e.message) || e}`)
-      return addItem(rel, fp) && 1
+      return addItem(rel, fp, null, kbId) && 1
     }
     return parts.length
   }
 
   /** 同素材旧版本（hash 不同）的未完结条目全部让位。 */
-  function supersede(rel, fp) {
+  function supersede(rel, fp, kbId) {
+    const kb = kbId || 'main'
     for (const it of items) {
-      if (it.rel === rel && it.hash !== fp.hash && (it.status === 'queued' || it.status === 'failed')) {
+      if (it.rel === rel && (it.kbId || 'main') === kb && it.hash !== fp.hash && (it.status === 'queued' || it.status === 'failed')) {
         it.status = 'skipped'; it.finishedAt = nowIso(); it.note = '素材在磁盘被覆盖（raw 不可变），由新记录接替'
         logger.warn(`dsh-kb: raw 素材被磁盘直写覆盖（违反不可变约定），重新入队：${rel}`)
       }
@@ -348,59 +362,65 @@ function createQueue({ root, ledgerFile, runner, logger = { info() {}, warn() {}
   }
 
   /** 单文件入队入口（upload 钩子 / 手动）。已跟踪且未变化时静默跳过。 */
-  function offer(rel) {
+  function offer(rel, kbId) {
     rel = String(rel || '').replace(/\\/g, '/').replace(/\/+$/, '')
     if (!rel.startsWith(RAW_PREFIX)) return { ok: false, reason: 'not-in-raw' }
-    const abs = path.join(rootAbs, ...rel.split('/'))
+    const kbRoot = rootFor(kbId)
+    if (!kbRoot) return { ok: false, reason: 'no-such-kb' }
+    const abs = path.join(kbRoot, ...rel.split('/'))
     let fp
     try { fp = fingerprint(abs) } catch (e) {
       if (e && e.code === 'ENOENT') return { ok: false, reason: 'missing' }
       throw e
     }
-    const prev = latestByRel(rel)
+    const prev = latestByRel(rel, kbId)
     if (prev && prev.hash === fp.hash && prev.status !== 'skipped') return { ok: true, dedup: true, item: prev }
-    supersede(rel, fp)
-    const added = admit(rel, fp)
+    supersede(rel, fp, kbId)
+    const added = admit(rel, fp, kbId)
     persist()
     kick()
     return { ok: true, added }
   }
 
-  /** 全量对账扫描：新文件入队、变更重排、消失标记、台账丢失时按 wiki sources 防重入。 */
-  function scan() {
+  /** 单库对账扫描：新文件入队、变更重排、消失标记、台账丢失时按 wiki sources 防重入。
+   *  宿主对每个素材库各调一次（kbId 缺省 = 主库）。 */
+  function scan(kbId) {
+    const kb = kbId || 'main'
+    const kbRoot = rootFor(kb)
+    if (!kbRoot) return { added: 0, scanned: 0 }
     const files = []
-    core.walkFiles(path.join(rootAbs, core.RAW_DIR), files, 5000)
+    core.walkFiles(path.join(kbRoot, core.RAW_DIR), files, 5000)
     const onDisk = new Map()
-    for (const abs of files) onDisk.set(path.relative(rootAbs, abs).split(path.sep).join('/'), abs)
+    for (const abs of files) onDisk.set(path.relative(kbRoot, abs).split(path.sep).join('/'), abs)
 
     let cited = null
-    const unknown = [...onDisk.keys()].filter((rel) => !latestByRel(rel))
-    if (unknown.length) cited = collectWikiSources(rootAbs)
+    const unknown = [...onDisk.keys()].filter((rel) => !latestByRel(rel, kb))
+    if (unknown.length) cited = collectWikiSources(kbRoot)
 
     let added = 0
     for (const [rel, abs] of onDisk) {
-      const prev = latestByRel(rel)
+      const prev = latestByRel(rel, kb)
       if (!prev) {
         if (cited && cited.has(rel)) continue // 台账没记录但 wiki 已引用 → 视为已加工
-        try { added += admit(rel, fingerprint(abs)) } catch { /* stat 竞态忽略 */ }
+        try { added += admit(rel, fingerprint(abs), kb) } catch { /* stat 竞态忽略 */ }
         continue
       }
       if (prev.status === 'done' || prev.status === 'skipped') {
         let fp
         try { fp = fingerprint(abs) } catch { continue }
-        if (fp.hash !== prev.hash) { supersede(rel, fp); added += admit(rel, fp) } // 磁盘直写覆盖终态素材 → 更新重排
+        if (fp.hash !== prev.hash) { supersede(rel, fp, kb); added += admit(rel, fp, kb) } // 磁盘直写覆盖终态素材 → 更新重排
         continue
       }
       // queued/running/failed：仅探测「覆盖」，不重复入队（offer 已处理多数场景）
       let fp
       try { fp = fingerprint(abs) } catch { continue }
       if (fp.hash !== prev.hash && prev.status !== 'running') {
-        supersede(rel, fp)
-        added += admit(rel, fp)
+        supersede(rel, fp, kb)
+        added += admit(rel, fp, kb)
       }
     }
     for (const it of items) {
-      if ((it.status === 'queued' || it.status === 'running' || it.status === 'failed') && !onDisk.has(it.rel)) {
+      if ((it.kbId || 'main') === kb && (it.status === 'queued' || it.status === 'running' || it.status === 'failed') && !onDisk.has(it.rel)) {
         it.status = 'skipped'; it.finishedAt = nowIso(); it.note = 'raw 素材已不存在'
       }
     }
@@ -463,16 +483,22 @@ function createQueue({ root, ledgerFile, runner, logger = { info() {}, warn() {}
       persist()
       return 'skipped'
     }
+    const kbRoot = rootFor(item.kbId)
+    if (!kbRoot) {
+      item.status = 'skipped'; item.finishedAt = nowIso(); item.note = '知识库已移除'
+      persist()
+      return 'skipped'
+    }
     const lim = limits()
     item.status = 'running'; item.startedAt = nowIso(); item.attempts++; item.sessionId = null; item.error = null
     persist()
 
-    const before = wikiSnapshot(rootAbs)
+    const before = wikiSnapshot(kbRoot)
     const ctrl = new AbortController()
     let aborted = null
     let settled = false
     const runP = (async () => {
-      const res = await runner(item, { signal: ctrl.signal })
+      const res = await runner(item, { signal: ctrl.signal, root: kbRoot })
       settled = true
       return res || {}
     })()
@@ -512,7 +538,7 @@ function createQueue({ root, ledgerFile, runner, logger = { info() {}, warn() {}
     executorDown = false
 
     // 产出验证双路：runner JSON pages ∪ wiki diff
-    const after = wikiSnapshot(rootAbs)
+    const after = wikiSnapshot(kbRoot)
     const diffPages = diffWiki(before, after).filter((rel) => rel.startsWith(WIKI_PREFIX))
     const tail = extractJsonTail(res.tail || res.output || '')
     const claimed = []

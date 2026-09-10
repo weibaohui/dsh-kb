@@ -439,6 +439,56 @@ function bootstrap(root, logger = { info() {}, warn() {} }) {
   return created
 }
 
+// ── 多知识库注册表 ───────────────────────────────────────────
+const REGISTRY_VERSION = 1
+
+/** 读注册表（文件缺失/损坏返回空表；损坏不备份——注册表可随时重建）。 */
+function loadKbRegistry(file) {
+  try {
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+    if (data && data.version === REGISTRY_VERSION && Array.isArray(data.kbs)) {
+      const kbs = data.kbs.filter((k) => k && k.id && typeof k.root === 'string' && k.root)
+      return { version: REGISTRY_VERSION, kbs }
+    }
+  } catch { /* 缺失按空表 */ }
+  return { version: REGISTRY_VERSION, kbs: [] }
+}
+
+/** 原子写注册表。 */
+function saveKbRegistry(file, data) {
+  const tmp = `${file}.tmp-${process.pid}-${crypto.randomBytes(3).toString('hex')}`
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 1), 'utf8')
+  fs.renameSync(tmp, file)
+}
+
+function newKbId() {
+  return 'kb-' + Date.now().toString(36) + '-' + crypto.randomBytes(3).toString('hex')
+}
+
+/** 新库根目录校验：绝对路径、存在且为目录、不为 / 或用户主目录本身。返回 {ok, abs|error}。 */
+function normalizeKbRoot(root, home) {
+  const raw = String(root || '').trim()
+  if (!raw) return { ok: false, error: '路径不能为空' }
+  if (raw.includes('\0')) return { ok: false, error: '非法路径' }
+  const abs = path.resolve(raw.replace(/^~(?=\/|$)/, home || ''))
+  if (!path.isAbsolute(abs)) return { ok: false, error: '必须是绝对路径' }
+  if (abs === '/' || abs === home) return { ok: false, error: '不能添加整个磁盘或主目录' }
+  let st
+  try { st = fs.statSync(abs) } catch (e) {
+    return { ok: false, error: `目录不存在：${abs}` }
+  }
+  if (!st.isDirectory()) return { ok: false, error: '不是目录' }
+  return { ok: true, abs }
+}
+
+/** 两根目录是否重叠（互相包含视为重叠）。 */
+function kbRootsOverlap(a, b) {
+  const ra = path.relative(a, b)
+  const rb = path.relative(b, a)
+  return ra === '' || rb === '' || (!ra.startsWith('..' + path.sep) && !path.isAbsolute(ra))
+}
+
 /** 默认根目录：DSH_KB_ROOT 覆盖，否则 ~/.dsh/kb。 */
 function defaultRoot() {
   if (process.env.DSH_KB_ROOT && process.env.DSH_KB_ROOT.trim()) return path.resolve(process.env.DSH_KB_ROOT.trim())
@@ -449,6 +499,7 @@ module.exports = {
   VERSION, KbError,
   RAW_DIR, WIKI_DIR, BOOT_DIRS, BOOT_FILES,
   TEXT_EXT, walkFiles,
+  REGISTRY_VERSION, loadKbRegistry, saveKbRegistry, newKbId, normalizeKbRoot, kbRootsOverlap,
   ensureRoot, resolveExisting, resolveCreatable, lexicalAbs, cleanSegment,
   listDir, parseFrontmatter, readDoc, sendFile, search, uploadRaw,
   statusPayload, bootstrap, defaultRoot,

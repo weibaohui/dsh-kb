@@ -376,3 +376,98 @@ test('大文件自动分片：逐片入队、逐片蒸馏、来源指向分片�
   q.offer(rel)
   await until(() => q.snapshot().items.some((it) => it.status === 'queued' && it.chunk && it.hash !== oldHash), 4000, '新版分片入队')
 })
+
+test('多知识库：同 rel 不同库互不干扰，蒸馏走各自库根', async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'kbq-multi-'))
+  const rootA = path.join(base, 'kbA')
+  const rootB = path.join(base, 'kbB')
+  for (const r of [rootA, rootB]) {
+    fs.mkdirSync(path.join(r, 'raw'), { recursive: true })
+    fs.mkdirSync(path.join(r, 'wiki', 'howtos'), { recursive: true })
+  }
+  const ledgerFile = path.join(base, 'queue.json')
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }))
+
+  const distilled = []
+  const runner = async (item, { root }) => {
+    distilled.push({ kb: item.kbId, root: path.basename(root) })
+    const page = `wiki/howtos/from-${item.kbId}.md`
+    fs.writeFileSync(path.join(root, page), `${item.kbId} 的成文`)
+    return { pages: [page], summary: `来自 ${item.kbId}` }
+  }
+  const q = makeQueue({
+    root: rootA,
+    rootOf: (id) => (id === 'kbB' ? rootB : rootA),
+    ledgerFile,
+    runner,
+    getLimits: () => ({ timeoutMs: 5000, maxAttempts: 1 }),
+  })
+  q.offer(writeRaw(rootA, 'same.md', 'A 库素材'), 'main')
+  q.offer(writeRaw(rootB, 'same.md', 'B 库素材'), 'kbB')
+  await until(() => q.snapshot().stats.done >= 2)
+  const items = q.snapshot().items
+  assert.strictEqual(items.length, 2, '两条互不吞并')
+  assert.ok(items.every((it) => it.status === 'done'))
+  assert.ok(fs.existsSync(path.join(rootA, 'wiki/howtos/from-main.md')))
+  assert.ok(fs.existsSync(path.join(rootB, 'wiki/howtos/from-kbB.md')))
+
+  // 库被移除（rootOf 返回 null）→ 排队条目直接 skipped
+  q.offer(writeRaw(rootB, 'gone.md', '稍后库没了'), 'kbB')
+  await until(() => q.snapshot().items.some((it) => it.status === 'running' || it.status === 'queued' && it.rel === 'raw/gone.md'), 2000).catch(() => {})
+  const s2 = q.snapshot()
+  const pending = s2.items.find((it) => it.rel === 'raw/gone.md')
+  if (pending && pending.status !== 'done') {
+    // 模拟库移除后 pick：rootFor 返回 null
+  }
+})
+
+test('多知识库：库移除后 queued 条目 skipped(知识库已移除)', async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'kbq-rm-'))
+  const root = path.join(base, 'kb')
+  fs.mkdirSync(path.join(root, 'raw'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'wiki'), { recursive: true })
+  const ledgerFile = path.join(base, 'queue.json')
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }))
+  fs.writeFileSync(path.join(root, 'raw', 'x.md'), '素材')
+  let hasRoot = true // 模拟附加库 kbX 被移除
+  const q = makeQueue({
+    root,
+    rootOf: (id) => (id === 'kbX' && hasRoot ? root : null),
+    ledgerFile,
+    runner: async () => ({}),
+    getLimits: () => ({ timeoutMs: 5000, maxAttempts: 1 }),
+  })
+  q.setPaused(true)
+  q.offer('raw/x.md', 'kbX')
+  hasRoot = false
+  q.setPaused(false)
+  await until(() => q.snapshot().stats.skipped >= 1)
+  const it = q.snapshot().items[0]
+  assert.strictEqual(it.status, 'skipped')
+  assert.ok(it.note.includes('知识库已移除'))
+  assert.strictEqual(it.kbId, 'kbX')
+})
+
+test('多知识库：scan(kbId) 只扫指定库', async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'kbq-scan-'))
+  const rootA = path.join(base, 'kbA')
+  const rootB = path.join(base, 'kbB')
+  for (const r of [rootA, rootB]) fs.mkdirSync(path.join(r, 'raw'), { recursive: true })
+  const ledgerFile = path.join(base, 'queue.json')
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }))
+  fs.writeFileSync(path.join(rootA, 'raw', 'a.md'), 'A')
+  fs.writeFileSync(path.join(rootB, 'raw', 'b.md'), 'B')
+  const q = makeQueue({
+    root: rootA,
+    rootOf: (id) => (id === 'kbB' ? rootB : rootA),
+    ledgerFile,
+    runner: async () => ({}),
+    getLimits: () => ({ timeoutMs: 5000, maxAttempts: 1 }),
+  })
+  q.setPaused(true)
+  const r = q.scan('kbB')
+  assert.strictEqual(r.scanned, 1)
+  const items = q.snapshot().items
+  assert.strictEqual(items.length, 1)
+  assert.strictEqual(items[0].kbId, 'kbB')
+})
