@@ -153,3 +153,25 @@ test('defaultRoot 遵循 DSH_KB_ROOT 覆盖', () => {
     else process.env.DSH_KB_ROOT = old
   }
 })
+
+test('normalizeKbRoot：目录不存在时自动创建', async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'kbnorm-'))
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }))
+  const target = path.join(base, 'deep', 'nested', 'newkb')
+  const r = core.normalizeKbRoot(target, os.homedir())
+  assert.strictEqual(r.ok, true)
+  assert.strictEqual(r.abs, target)
+  assert.ok(fs.statSync(target).isDirectory(), '目录已递归创建')
+
+  // 非 ENOENT 错误仍拒绝（目标是文件）
+  const filePath = path.join(base, 'afile')
+  fs.writeFileSync(filePath, 'x')
+  const r2 = core.normalizeKbRoot(filePath, os.homedir())
+  assert.strictEqual(r2.ok, false)
+  assert.ok(r2.error.includes('不是目录'))
+
+  // 危险路径仍拒绝
+  assert.strictEqual(core.normalizeKbRoot('/', os.homedir()).ok, false)
+  assert.strictEqual(core.normalizeKbRoot(os.homedir(), os.homedir()).ok, false)
+  assert.strictEqual(core.normalizeKbRoot('', os.homedir()).ok, false)
+})

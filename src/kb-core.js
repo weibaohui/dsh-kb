@@ -466,7 +466,7 @@ function newKbId() {
   return 'kb-' + Date.now().toString(36) + '-' + crypto.randomBytes(3).toString('hex')
 }
 
-/** 新库根目录校验：绝对路径、存在且为目录、不为 / 或用户主目录本身。返回 {ok, abs|error}。 */
+/** 新库根目录校验：绝对路径、目录不存在时自动创建（recursive）、不为 / 或用户主目录本身。返回 {ok, abs|error}。 */
 function normalizeKbRoot(root, home) {
   const raw = String(root || '').trim()
   if (!raw) return { ok: false, error: '路径不能为空' }
@@ -475,8 +475,16 @@ function normalizeKbRoot(root, home) {
   if (!path.isAbsolute(abs)) return { ok: false, error: '必须是绝对路径' }
   if (abs === '/' || abs === home) return { ok: false, error: '不能添加整个磁盘或主目录' }
   let st
-  try { st = fs.statSync(abs) } catch (e) {
-    return { ok: false, error: `目录不存在：${abs}` }
+  try {
+    st = fs.statSync(abs)
+  } catch (e) {
+    if (!(e && e.code === 'ENOENT')) return { ok: false, error: `无法读取目录：${(e && e.message) || e}` }
+    try { fs.mkdirSync(abs, { recursive: true }) } catch (e2) {
+      return { ok: false, error: `目录不存在且创建失败：${(e2 && e2.message) || e2}` }
+    }
+    try { st = fs.statSync(abs) } catch (e3) {
+      return { ok: false, error: `创建后仍不可读：${abs}` }
+    }
   }
   if (!st.isDirectory()) return { ok: false, error: '不是目录' }
   return { ok: true, abs }

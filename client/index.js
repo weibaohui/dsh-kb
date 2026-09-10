@@ -1200,7 +1200,7 @@ function KbPage() {
           )),
           adding ? h('div', { style: { border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, padding: 8, margin: '4px 0 8px', display: 'grid', gap: 6 } },
             h('input', { className: 'kb-search', style: { width: '100%' }, placeholder: '名称（默认取目录名）', value: adding.name, onChange: (e) => setAdding((a) => ({ ...a, name: e.target.value })) }),
-            h('input', { className: 'kb-search', style: { width: '100%' }, placeholder: '文件夹绝对路径（如 /data/docs）', value: adding.root, onChange: (e) => setAdding((a) => ({ ...a, root: e.target.value })) }),
+            h('input', { className: 'kb-search', style: { width: '100%' }, placeholder: '文件夹绝对路径（不存在将自动创建）', value: adding.root, onChange: (e) => setAdding((a) => ({ ...a, root: e.target.value })) }),
             h('label', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
               h('input', { type: 'checkbox', checked: adding.kind === 'material', onChange: (e) => setAdding((a) => ({ ...a, kind: e.target.checked ? 'material' : 'produced' })) }),
               '素材库（建骨架并可自动蒸馏；产出库只读）',
