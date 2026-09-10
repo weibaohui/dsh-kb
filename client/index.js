@@ -535,8 +535,9 @@ function openKbSession(sessionId, hint) {
 /** 右栏：自动蒸馏队列视图（数据由 KbPage 统一轮询，这里只渲染+发起操作）。 */
 function QueueView(props) {
   const h = React.createElement
-  const { data, kbs, onAction, onNav, onHint } = props
+  const { data, kbs, onAction, onNav, onHint, onToggleDistill } = props
   const kbName = (id) => { const k = (kbs || []).find((x) => x.id === (id || 'main')); return k ? k.name : (id || 'main') }
+  const distillKbs = (kbs || []).filter((k) => k.kind === 'material' && k.id !== 'main')
   if (!data) return h('div', { className: 'kb-spin' }, '读取队列…')
   const stats = data.stats || {}
   const statChips = ['running', 'queued', 'failed', 'done', 'skipped'].map((k) =>
@@ -552,6 +553,14 @@ function QueueView(props) {
         (data.pausedByUser || data.paused) ? '▶ 恢复' : '⏸ 暂停'),
       h('button', { className: 'kb-btn', onClick: () => onAction('scan', {}) }, '扫描 raw/'),
     ),
+    distillKbs.length ? h('div', { className: 'kb-q-model' },
+      '素材库自动蒸馏：',
+      distillKbs.map((k) => h('button', {
+        key: k.id, className: 'kb-btn', style: { marginLeft: 6, padding: '2px 8px', fontSize: 11.5 },
+        title: k.distillEnabled === false ? '该库自动蒸馏已关，点击开启' : '该库自动蒸馏已开，点击关闭',
+        onClick: () => onToggleDistill(k),
+      }, `${k.name} · ${k.distillEnabled === false ? '关' : '开'}`)),
+    ) : null,
     (data.executorDown || data.lastError) && h('div', { className: 'kb-q-banner' },
       `⚠️ 执行器不可用：${data.lastError || '稍后自动重试'}（排队条目会保留，配置好模型后自动继续）`),
     data.route ? h('div', { className: 'kb-q-model' },
@@ -1182,20 +1191,15 @@ function KbPage() {
           h('div', { className: 'kb-side-h' }, '知识库',
             h('button', { title: adding ? '取消添加' : '添加知识库（素材库可自动蒸馏；产出库只读）', onClick: () => setAdding(adding ? null : { name: '', root: '', kind: 'material', distillEnabled: true }) }, adding ? '× 取消' : '＋ 添加'),
           ),
-          (kbs || []).map((k) => h('div', { key: k.id, style: { display: 'flex', alignItems: 'center', gap: 2 } },
+          (kbs || []).map((k) => h('div', { key: k.id, style: { display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 } },
             h('button', {
-              className: 'kb-item', 'data-cur': k.id === kbId, style: { flex: 1, minWidth: 0 }, title: k.root,
+              className: 'kb-item', 'data-cur': k.id === kbId, style: { flex: '1 1 0', minWidth: 0, width: 'auto' }, title: k.root,
               onClick: () => { setKbId(k.id); setNav({ kind: 'doc', rel: 'index.md' }) },
             },
               h('span', null, k.kind === 'produced' ? '📁' : '📚'),
               h('span', { className: 'nm' }, k.name),
               k.counts ? h('span', { className: 'kb-counts' }, `${k.counts.wiki}|${k.counts.raw}`) : null,
             ),
-            k.kind === 'material' && k.id !== 'main' ? h('button', {
-              className: 'at', title: k.distillEnabled === false ? '蒸馏已关，点击开启' : '蒸馏已开，点击关闭',
-              style: { color: k.distillEnabled === false ? 'var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))' : 'var(--dsw-alias-brand-primary)' },
-              onClick: (e) => { e.stopPropagation(); toggleDistill(k) },
-            }, '蒸') : null,
             k.id !== 'main' ? h('button', { className: 'at', title: '移除该知识库（不删数据）', onClick: (e) => { e.stopPropagation(); delKb(k) } }, '✕') : null,
           )),
           adding ? h('div', { style: { border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, padding: 8, margin: '4px 0 8px', display: 'grid', gap: 6 } },
@@ -1219,7 +1223,7 @@ function KbPage() {
           error && h('div', { className: 'kb-err' }, error),
           !error && nav.kind === 'doc' && h(DocView, { rel: nav.rel, root: status && status.root, kb: kbId, onNav, onAt: atRel, onUpload: upload, reloadTick, uploadTick }),
           !error && nav.kind === 'search' && h(SearchView, { q: nav.q, kb: kbId, onNav, onAt: atRel }),
-          !error && nav.kind === 'queue' && h(QueueView, { data: queueData, kbs, onAction: queueAction, onNav, onHint: showHint }),
+          !error && nav.kind === 'queue' && h(QueueView, { data: queueData, kbs, onToggleDistill: toggleDistill, onAction: queueAction, onNav, onHint: showHint }),
         ),
       ),
     ),
