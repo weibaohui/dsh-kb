@@ -1289,10 +1289,6 @@ window.__ModuleLoader__.load({
       const qPending = qStats ? (qStats.queued || 0) + (qStats.running || 0) : 0
       const qFailed = qStats ? qStats.failed || 0 : 0
 
-      const counts = status && status.counts
-        ? h('span', { className: 'kb-counts' }, `wiki ${status.counts.wiki} · raw ${status.counts.raw}`)
-        : null
-
       // 蒸馏队列是全局的（跨库串行），入口放顶栏右上角；徽章=待处理数，有失败变红
       const curKb = (kbs || []).find((k) => k.id === kbId)
       const queueBtn = h('button', {
@@ -1313,7 +1309,7 @@ window.__ModuleLoader__.load({
           onDragEnter, onDragOver, onDragLeave, onDrop,
         },
           h('div', { className: 'kb-head' },
-            h('p', { className: 'kb-title' }, '📚 ', (kbs || []).find((k) => k.id === kbId)?.name || '知识库', counts),
+            h('p', { className: 'kb-title' }, '📚 知识库'),
             h('input', {
               className: 'kb-search', placeholder: '全文搜索（Enter）…', value: query,
               onChange: (e) => setQuery(e.target.value),
@@ -1340,7 +1336,7 @@ window.__ModuleLoader__.load({
                 },
                   !kbs ? [h('option', { key: 'loading', value: '', disabled: true }, '加载中…')]
                     : (kbs || []).map((k) => h('option', { key: k.id, value: k.id },
-                      (k.kind === 'produced' ? '📁 ' : '📚 ') + k.name + (k.counts ? `（${k.counts.wiki}|${k.counts.raw}）` : ''))),
+                      (k.kind === 'produced' ? '📁 ' : '📚 ') + k.name)),
                 ),
                 h('button', { className: 'kb-kbbtn', title: '新建知识库（素材库可自动蒸馏；产出库只读）', onClick: () => setAdding({ name: '', root: '', kind: 'material', distillEnabled: true }) }, '＋'),
                 curKb && curKb.id !== 'main' ? h('button', { className: 'kb-kbbtn danger', title: '移除当前知识库「' + curKb.name + '」（不删数据）', onClick: () => delKb(curKb) }, '✕') : null,
