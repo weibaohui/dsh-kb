@@ -53,6 +53,7 @@ styles.insert(`
 .kb-btn:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-label-primary) 24%,var(--dsw-alias-border-l2))}
 .kb-btn:disabled{opacity:.5;cursor:default}
 .kb-btn.primary{color:var(--dsw-alias-brand-primary);border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 40%,var(--dsw-alias-border-l2))}
+.kb-btn[data-cur="true"]{color:var(--dsw-alias-brand-primary);border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 45%,var(--dsw-alias-border-l2))}
 .kb-search{flex:none;width:min(360px,40vw);padding:6px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px}
 .kb-search:focus{outline:none;border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 50%,var(--dsw-alias-border-l2))}
 .kb-body{display:flex;flex:1;min-height:0}
@@ -1277,23 +1278,21 @@ function KbPage() {
   const qStats = queueData && queueData.stats
   const qPending = qStats ? (qStats.queued || 0) + (qStats.running || 0) : 0
   const qFailed = qStats ? qStats.failed || 0 : 0
-  const queueEntry = h('button', { className: 'kb-item', 'data-cur': nav.kind === 'queue', onClick: () => onNav({ kind: 'queue' }) },
-    h('span', null, '⚗️'),
-    h('span', { className: 'nm' }, '蒸馏队列'),
-    qPending > 0 ? h('span', { className: `kb-q-badge${qFailed > 0 ? ' alert' : ''}` }, qPending) : null,
-  )
 
   const counts = status && status.counts
     ? h('span', { className: 'kb-counts' }, `wiki ${status.counts.wiki} · raw ${status.counts.raw}`)
     : null
 
+  // 蒸馏队列是全局的（跨库串行），入口放顶栏右上角；徽章=待处理数，有失败变红
   const curKb = (kbs || []).find((k) => k.id === kbId)
-  const schemaBtn = h('button', {
-    className: 'kb-btn',
-    title: curKb && curKb.kind !== 'material' ? '产出库只读' : '编辑当前知识库的加工约定（schema.md，每库独立）',
-    disabled: !curKb || curKb.kind !== 'material',
-    onClick: () => onNav({ kind: 'schema-edit' }),
-  }, '📐 约定')
+  const queueBtn = h('button', {
+    className: 'kb-btn', 'data-cur': nav.kind === 'queue',
+    title: '蒸馏队列（全局，跨库串行加工）',
+    onClick: () => onNav({ kind: 'queue' }),
+  },
+    '⚗️ 蒸馏队列',
+    qPending > 0 ? h('span', { className: `kb-q-badge${qFailed > 0 ? ' alert' : ''}`, style: { marginLeft: 4 } }, qPending) : null,
+  )
 
   return h(React.Fragment, null,
     h('button', { type: 'button', className: 'kb-trigger', onClick: () => setOpen(true), 'aria-label': '知识库' },
@@ -1311,7 +1310,7 @@ function KbPage() {
           onKeyDown: (e) => { if (e.key === 'Enter' && !(e.isComposing === true)) doSearch() },
         }),
         h('span', { className: 'kb-root', title: status && status.root }, status && status.root ? status.root : ''),
-        schemaBtn,
+        queueBtn,
         h('label', { className: 'kb-btn primary', style: { cursor: 'pointer' }, title: '上传素材（自动蒸馏入队）' },
           '⬆ 上传素材',
           h('input', {
@@ -1339,7 +1338,6 @@ function KbPage() {
           quick('index.md', '目录', '📖'),
           quick('log.md', '操作流水', '🧾'),
           quick('schema.md', 'KB 约定', '📐'),
-          queueEntry,
           h(TreeSection, { rootRel: 'wiki', label: 'wiki · 成文知识', kb: kbId, cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, reloadTick }),
           h(TreeSection, { rootRel: 'raw', label: 'raw · 素材（不可变）', kb: kbId, cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, onUpload: upload, reloadTick }),
         ),
