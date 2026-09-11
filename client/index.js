@@ -135,6 +135,20 @@ input.kb-file{display:none}
 .kb-chip.skipped{color:var(--dsw-alias-label-secondary);border-style:dashed}
 .kb-q-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-layer-1);font-size:10.5px;font-weight:700;margin-left:6px}
 .kb-q-badge.alert{background:#d64545}
+/* 库切换下拉 + 新建知识库对话框 */
+.kb-kbrow{display:flex;gap:6px;align-items:center;padding:2px 4px 8px}
+.kb-kbsel{flex:1;min-width:0;height:30px;padding:0 6px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px}
+.kb-kbsel:focus{outline:none;border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 50%,var(--dsw-alias-border-l2))}
+.kb-kbbtn{flex:none;width:30px;height:30px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary);font-size:14px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;padding:0}
+.kb-kbbtn:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent)}
+.kb-kbbtn.danger{color:var(--dsw-alias-state-error-primary,#d64545)}
+.kb-kbbtn.danger:hover{background:color-mix(in srgb,#d64545 12%,transparent);border-color:color-mix(in srgb,#d64545 40%,var(--dsw-alias-border-l2))}
+.kb-modal-mask{position:fixed;inset:0;z-index:2147483600;background:rgba(0,0,0,.38);display:flex;align-items:center;justify-content:center}
+.kb-modal{width:min(400px,92vw);background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:16px;display:grid;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,.25)}
+.kb-modal-h{margin:0;font-size:14px;font-weight:600}
+.kb-modal-in{width:100%}
+.kb-modal-acts{display:flex;justify-content:flex-end;gap:8px;margin-top:2px}
+.kb-modal-note{font-size:11px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))}
 /* 库约定编辑器（schema.md，每库一份） */
 .kb-schema{display:flex;flex-direction:column;max-width:980px;min-height:0}
 .kb-schema-hint{font-size:12px;line-height:1.7;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));margin:0 0 10px}
@@ -1138,10 +1152,14 @@ function KbPage() {
   React.useEffect(() => { activeKbId = kbId }, [kbId])
 
   React.useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape' && open && !(e.isComposing === true)) setOpen(false) }
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || !open || e.isComposing === true) return
+      if (adding) setAdding(null) // 对话框开着时 Esc 只关对话框
+      else setOpen(false)
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [open, adding])
 
   const showHint = (msg) => {
     setToast(msg)
@@ -1205,11 +1223,13 @@ function KbPage() {
     setBusy(true)
     try {
       const d = await readJson(await fetch(`${API}/kb`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(adding) }))
+      const l = await fetchKbs(true)
+      setKbs(l || [])
       setAdding(null)
-      fetchKbs(true).then((l) => setKbs(l || []))
-      setKbId(d.kb.id)
+      setKbId(d.kb.id) // 下拉框刷新后选中新建的知识库
+      setNav({ kind: 'doc', rel: 'index.md' })
       setReloadTick((t) => t + 1)
-      showHint(`已添加「${d.kb.name}」`)
+      showHint(`已添加「${d.kb.name}」并选中`)
     } catch (e) { showHint('添加失败：' + ((e && e.message) || e)) }
     setBusy(false)
   }
@@ -1304,30 +1324,18 @@ function KbPage() {
       ),
       h('div', { className: 'kb-body' },
         h('div', { className: 'kb-side' },
-          h('div', { className: 'kb-side-h' }, '知识库',
-            h('button', { title: adding ? '取消添加' : '添加知识库（素材库可自动蒸馏；产出库只读）', onClick: () => setAdding(adding ? null : { name: '', root: '', kind: 'material', distillEnabled: true }) }, adding ? '× 取消' : '＋ 添加'),
-          ),
-          (kbs || []).map((k) => h('div', { key: k.id, style: { display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 } },
-            h('button', {
-              className: 'kb-item', 'data-cur': k.id === kbId, style: { flex: '1 1 0', minWidth: 0, width: 'auto' }, title: k.root,
-              onClick: () => { setKbId(k.id); setNav({ kind: 'doc', rel: 'index.md' }) },
+          h('div', { className: 'kb-kbrow' },
+            h('select', {
+              className: 'kb-kbsel', value: kbs ? kbId : '', title: '切换知识库', 'aria-label': '切换知识库',
+              onChange: (e) => { setKbId(e.target.value); setNav({ kind: 'doc', rel: 'index.md' }) },
             },
-              h('span', null, k.kind === 'produced' ? '📁' : '📚'),
-              h('span', { className: 'nm' }, k.name),
-              k.counts ? h('span', { className: 'kb-counts' }, `${k.counts.wiki}|${k.counts.raw}`) : null,
+              !kbs ? [h('option', { key: 'loading', value: '', disabled: true }, '加载中…')]
+                : (kbs || []).map((k) => h('option', { key: k.id, value: k.id },
+                  (k.kind === 'produced' ? '📁 ' : '📚 ') + k.name + (k.counts ? `（${k.counts.wiki}|${k.counts.raw}）` : ''))),
             ),
-            k.id !== 'main' ? h('button', { className: 'at', title: '移除该知识库（不删数据）', onClick: (e) => { e.stopPropagation(); delKb(k) } }, '✕') : null,
-          )),
-          adding ? h('div', { style: { border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, padding: 8, margin: '4px 0 8px', display: 'grid', gap: 6 } },
-            h('input', { className: 'kb-search', style: { width: '100%' }, placeholder: '名称（默认取目录名）', value: adding.name, onChange: (e) => setAdding((a) => ({ ...a, name: e.target.value })) }),
-            h('input', { className: 'kb-search', style: { width: '100%' }, placeholder: '文件夹绝对路径（不存在将自动创建）', value: adding.root, onChange: (e) => setAdding((a) => ({ ...a, root: e.target.value })) }),
-            h('label', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
-              h('input', { type: 'checkbox', checked: adding.kind === 'material', onChange: (e) => setAdding((a) => ({ ...a, kind: e.target.checked ? 'material' : 'produced' })) }),
-              '素材库（建骨架并可自动蒸馏；产出库只读）',
-            ),
-            h('button', { className: 'kb-btn primary', disabled: busy || !adding.root.trim(), onClick: addKb }, busy ? '添加中…' : '添加'),
-            h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))' } }, '注意：添加后该目录将可经局域网 API 浏览/上传。'),
-          ) : null,
+            h('button', { className: 'kb-kbbtn', title: '新建知识库（素材库可自动蒸馏；产出库只读）', onClick: () => setAdding({ name: '', root: '', kind: 'material', distillEnabled: true }) }, '＋'),
+            curKb && curKb.id !== 'main' ? h('button', { className: 'kb-kbbtn danger', title: '移除当前知识库「' + curKb.name + '」（不删数据）', onClick: () => delKb(curKb) }, '✕') : null,
+          ),
           quick('index.md', '目录', '📖'),
           quick('log.md', '操作流水', '🧾'),
           quick('schema.md', 'KB 约定', '📐'),
@@ -1346,6 +1354,30 @@ function KbPage() {
           !error && nav.kind === 'search' && h(SearchView, { q: nav.q, kb: kbId, onNav, onAt: atRel }),
           !error && nav.kind === 'queue' && h(QueueView, { data: queueData, kbs, onToggleDistill: toggleDistill, onAction: queueAction, onNav, onHint: showHint }),
         ),
+      ),
+    ),
+    adding && h('div', { className: 'kb-modal-mask', onMouseDown: (e) => { if (e.target === e.currentTarget) setAdding(null) } },
+      h('div', { className: 'kb-modal', role: 'dialog', 'aria-label': '新建知识库' },
+        h('p', { className: 'kb-modal-h' }, '📚 新建知识库'),
+        h('input', {
+          className: 'kb-search kb-modal-in', placeholder: '名称（默认取目录名）', autoFocus: true, value: adding.name,
+          onChange: (e) => setAdding((a) => ({ ...a, name: e.target.value })),
+          onKeyDown: (e) => { if (e.key === 'Enter' && !(e.isComposing === true) && adding.root.trim() && !busy) addKb() },
+        }),
+        h('input', {
+          className: 'kb-search kb-modal-in', placeholder: '文件夹绝对路径（不存在将自动创建）', value: adding.root,
+          onChange: (e) => setAdding((a) => ({ ...a, root: e.target.value })),
+          onKeyDown: (e) => { if (e.key === 'Enter' && !(e.isComposing === true) && adding.root.trim() && !busy) addKb() },
+        }),
+        h('label', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
+          h('input', { type: 'checkbox', checked: adding.kind === 'material', onChange: (e) => setAdding((a) => ({ ...a, kind: e.target.checked ? 'material' : 'produced' })) }),
+          '素材库（建骨架并可自动蒸馏；产出库只读）',
+        ),
+        h('div', { className: 'kb-modal-acts' },
+          h('button', { className: 'kb-btn', onClick: () => setAdding(null) }, '取消'),
+          h('button', { className: 'kb-btn primary', disabled: busy || !adding.root.trim(), onClick: addKb }, busy ? '添加中…' : '确定'),
+        ),
+        h('div', { className: 'kb-modal-note' }, '注意：添加后该目录将可经局域网 API 浏览/上传。'),
       ),
     ),
     toast && h('div', { className: 'kb-toast' }, toast),
