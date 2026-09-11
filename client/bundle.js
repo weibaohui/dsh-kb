@@ -14,13 +14,14 @@ window.__ModuleLoader__.load({
      * @weibaohui/dsh-kb — Client half
      *
      * 侧栏底部入口（sidebar.footer.action）→ 全页知识库 overlay（dsh-tasks 同款交互）：
-     *  - 左栏：快捷入口（index/log/schema）+ wiki/ 与 raw/ 懒加载目录树；
-     *  - 右栏：markdown 阅读渲染（frontmatter 徽章、[[wikilink]]、内部链接、图片、代码块）
-     *    或全文搜索结果（内置扫描引擎，命中高亮）；
-     *  - raw/ 下可上传素材（唯一写路径，服务端强制），任意条目可「@ 给 agent」注入 composer
+     *  - 左栏：快捷入口（index/log/schema）+ wiki/ 与 raw/ 懒加载目录树 + 多库切换器；
+     *  - 右栏：markdown 阅读渲染（frontmatter 徽章、[[wikilink]]、内部链接、图片、代码块）、
+     *    全文搜索结果（内置扫描引擎，命中高亮）、蒸馏队列面板、
+     *    库约定编辑器（schema.md，每库一份：⌘S 保存 / 恢复默认模板）；
+     *  - raw/ 下可上传素材，任意条目可「@ 给 agent」注入 composer
      *    （先关 overlay 再注入，composer 不可得时退化为复制到剪贴板）。
      *
-     * 数据通道：宿主同源路由 /dsh-kb/api（固定知识库根，服务端边界校验）。
+     * 数据通道：宿主同源路由 /dsh-kb/api（服务端边界校验）。
      * 自包含：只依赖注入的 react（createElement/hooks），不用 react-dom 等平台模块。
      */
 
@@ -144,6 +145,12 @@ window.__ModuleLoader__.load({
     .kb-chip.skipped{color:var(--dsw-alias-label-secondary);border-style:dashed}
     .kb-q-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-layer-1);font-size:10.5px;font-weight:700;margin-left:6px}
     .kb-q-badge.alert{background:#d64545}
+    /* 库约定编辑器（schema.md，每库一份） */
+    .kb-schema{display:flex;flex-direction:column;max-width:980px;min-height:0}
+    .kb-schema-hint{font-size:12px;line-height:1.7;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));margin:0 0 10px}
+    .kb-schema-hint b{color:var(--dsw-alias-label-secondary);font-weight:600}
+    .kb-schema-ta{height:calc(100vh - 280px);min-height:340px;width:100%;resize:vertical;font-family:var(--ds-font-family-code,ui-monospace,monospace);font-size:12.5px;line-height:1.8;padding:14px 16px;border-radius:10px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);white-space:pre-wrap;word-break:break-word}
+    .kb-schema-ta:focus{outline:none;border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 50%,var(--dsw-alias-border-l2))}
     `)
 
     async function readJson(response) {
@@ -488,6 +495,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'kb-docbar' },
           h('span', { className: 'kb-docpath', title: rel }, rel + (doc.size != null ? ' · ' + fmtSize(doc.size) : '') + (doc.mtime ? ' · ' + fmtTime(doc.mtime) : '')),
           h('button', { className: 'kb-btn', onClick: () => onAt(rel) }, '@ 给 agent'),
+          rel === 'schema.md' && props.onEditSchema ? h('button', { className: 'kb-btn', title: '编辑本库的加工约定（每库独立）', onClick: props.onEditSchema }, '✏️ 编辑约定') : null,
           doc.kind === 'binary' ? h('a', { className: 'kb-btn', style: { textDecoration: 'none' }, href: apiFile(rel, true) }, '下载') : null,
           inRaw ? h('label', { className: 'kb-btn', style: { cursor: 'pointer' }, title: '上传到 ' + (dirOf || 'raw') },
             '上传素材', h('input', { type: 'file', multiple: true, className: 'kb-file', onChange: (e) => props.onUpload(dirOf || 'raw', e.target.files), key: 'up' + rel + String(props.uploadTick || 0) }),
@@ -497,6 +505,71 @@ window.__ModuleLoader__.load({
         rel === 'index.md' ? h(RecentUpdates, { onNav, kb: props.kb }) : null,
         doc.kind === 'text' ? h('pre', { className: 'kb-md-pre' }, doc.body) : null,
         doc.kind === 'binary' ? h('div', { className: 'kb-empty' }, '二进制/超大文件不支持在线阅读，可下载或 @ 给 agent 处理。') : null,
+      )
+    }
+
+    /**
+     * 右栏：库约定（schema.md）编辑器——每库一份、互不影响。
+     * kb-bot 自动蒸馏与交互 agent 加工前都以它为最终权威，保存即对下次加工生效。
+     */
+    function SchemaEditor(props) {
+      const h = React.createElement
+      const { kb, kbName, onDone, onHint, onSaved } = props
+      const [state, setState] = React.useState({ status: 'loading' })
+
+      React.useEffect(() => {
+        let alive = true
+        setState({ status: 'loading' })
+        fetch(`${API}/schema?kb=${encodeURIComponent(kb || 'main')}`)
+          .then(readJson)
+          .then((d) => { if (alive) setState({ status: 'ok', text: d.text, exists: d.exists !== false, dirty: false }) })
+          .catch((e) => { if (alive) setState({ status: 'error', message: String((e && e.message) || e) }) })
+        return () => { alive = false }
+      }, [kb])
+
+      const save = async () => {
+        try {
+          await readJson(await fetch(`${API}/schema?kb=${encodeURIComponent(kb || 'main')}`, {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: state.text }),
+          }))
+          setState((s) => ({ ...s, dirty: false, exists: true }))
+          onHint('约定已保存 · 自动蒸馏与 agent 的下次加工即按新约定执行 ✅')
+          if (onSaved) onSaved()
+        } catch (e) { onHint('保存失败：' + ((e && e.message) || e)) }
+      }
+
+      const resetDefault = async () => {
+        try {
+          const d = await readJson(await fetch(`${API}/schema/default`))
+          setState((s) => ({ ...s, text: d.text, dirty: true }))
+        } catch (e) { onHint('获取默认模板失败：' + ((e && e.message) || e)) }
+      }
+
+      if (state.status === 'loading') return h('div', { className: 'kb-spin' }, '加载中…')
+      if (state.status === 'error') return h('div', { className: 'kb-err' }, '读取失败：' + state.message)
+      return h('div', { className: 'kb-schema' },
+        h('div', { className: 'kb-docbar' },
+          h('span', { className: 'kb-docpath' }, `schema.md · 「${kbName || '主库'}」的加工约定`),
+          h('button', { className: 'kb-btn', title: '把编辑框内容换成默认模板（仍需点保存才写入）', onClick: resetDefault }, '恢复默认模板'),
+          h('button', { className: 'kb-btn', onClick: () => { if (!state.dirty || window.confirm('有未保存的修改，放弃并返回？')) onDone() } }, '取消'),
+          h('button', { className: 'kb-btn primary', disabled: !state.dirty, title: '⌘S / Ctrl+S', onClick: save }, '保存'),
+        ),
+        h('p', { className: 'kb-schema-hint' },
+          h('b', null, '这份约定只作用于当前知识库'), '：kb-bot 自动蒸馏与交互 agent 加工前都会先读它（最终权威），改完保存即生效，无需重启。各库约定互不影响，可按库定制页面规范、目录用途与加工流程。',
+          !state.exists ? ' schema.md 当前不存在（曾被删除），保存后将按编辑框内容创建。' : null,
+        ),
+        h('textarea', {
+          className: 'kb-schema-ta', value: state.text, spellCheck: false,
+          onChange: (e) => setState((s) => ({ ...s, text: e.target.value, dirty: true })),
+          onKeyDown: (e) => {
+            if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S') && !(e.isComposing === true)) {
+              e.preventDefault()
+              if (state.dirty) save()
+            }
+          },
+        }),
       )
     }
 
@@ -1204,6 +1277,14 @@ window.__ModuleLoader__.load({
         ? h('span', { className: 'kb-counts' }, `wiki ${status.counts.wiki} · raw ${status.counts.raw}`)
         : null
 
+      const curKb = (kbs || []).find((k) => k.id === kbId)
+      const schemaBtn = h('button', {
+        className: 'kb-btn',
+        title: curKb && curKb.kind !== 'material' ? '产出库只读' : '编辑当前知识库的加工约定（schema.md，每库独立）',
+        disabled: !curKb || curKb.kind !== 'material',
+        onClick: () => onNav({ kind: 'schema-edit' }),
+      }, '📐 约定')
+
       return h(React.Fragment, null,
         h('button', { type: 'button', className: 'kb-trigger', onClick: () => setOpen(true), 'aria-label': '知识库' },
           h('span', { 'aria-hidden': 'true' }, '📚'), h('span', null, '知识库')),
@@ -1220,6 +1301,7 @@ window.__ModuleLoader__.load({
               onKeyDown: (e) => { if (e.key === 'Enter' && !(e.isComposing === true)) doSearch() },
             }),
             h('span', { className: 'kb-root', title: status && status.root }, status && status.root ? status.root : ''),
+            schemaBtn,
             h('label', { className: 'kb-btn primary', style: { cursor: 'pointer' }, title: '上传素材（自动蒸馏入队）' },
               '⬆ 上传素材',
               h('input', {
@@ -1265,7 +1347,12 @@ window.__ModuleLoader__.load({
             ),
             h('div', { className: 'kb-main' },
               error && h('div', { className: 'kb-err' }, error),
-              !error && nav.kind === 'doc' && h(DocView, { rel: nav.rel, root: status && status.root, kb: kbId, onNav, onAt: atRel, onUpload: upload, reloadTick, uploadTick }),
+              !error && nav.kind === 'doc' && h(DocView, { rel: nav.rel, root: status && status.root, kb: kbId, onNav, onAt: atRel, onUpload: upload, reloadTick, uploadTick, onEditSchema: nav.rel === 'schema.md' ? () => onNav({ kind: 'schema-edit' }) : null }),
+              !error && nav.kind === 'schema-edit' && h(SchemaEditor, {
+                kb: kbId, kbName: curKb && curKb.name, onHint: showHint,
+                onDone: () => onNav({ kind: 'doc', rel: 'schema.md' }),
+                onSaved: () => setReloadTick((t) => t + 1),
+              }),
               !error && nav.kind === 'search' && h(SearchView, { q: nav.q, kb: kbId, onNav, onAt: atRel }),
               !error && nav.kind === 'queue' && h(QueueView, { data: queueData, kbs, onToggleDistill: toggleDistill, onAction: queueAction, onNav, onHint: showHint }),
             ),

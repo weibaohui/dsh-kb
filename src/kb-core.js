@@ -9,7 +9,8 @@
  *    + index.md（目录）+ log.md（操作流水）+ schema.md（agent 规则）；
  *  - resolveSafe 家族保证所有磁盘路径都落在 root 内（词法边界 + 符号链接真实路径边界）；
  *  - 搜索：内置全文扫描（纯 JS，零外部依赖，文本类型文件、大小与命中数有上限）；
- *  - 写路径只有一条：上传到 raw/ 下（拒绝覆盖）。wiki 编辑收口在 agent（见 skill/dsh-kb）。
+ *  - 写路径两条：上传到 raw/ 下（拒绝覆盖）+ 库约定 schema.md 的人工编辑
+ *   （readSchema/writeSchema，白名单只此一个文件）。wiki 编辑收口在 agent（见 skill/dsh-kb）。
  *
  * 目录约定沿用 Karpathy LLM Wiki 模式：Raw(不可变) → Wiki(成文) → Schema(规则)，
  * 人丢素材、agent 加工维护，详见 skill/dsh-kb/SKILL.md。
@@ -23,6 +24,8 @@ const VERSION = '0.2.0'
 
 const RAW_DIR = 'raw'
 const WIKI_DIR = 'wiki'
+const SCHEMA_FILE = 'schema.md'
+const SCHEMA_MAX_BYTES = 256 * 1024       // 库约定编辑保存上限
 const BOOT_DIRS = [RAW_DIR, path.join(WIKI_DIR, 'howtos'), path.join(WIKI_DIR, 'decisions'), path.join(WIKI_DIR, 'postmortems'), path.join(WIKI_DIR, 'notes')]
 const BOOT_FILES = ['index.md', 'log.md', 'schema.md']
 
@@ -416,6 +419,37 @@ const BOOT_LOG = `# 操作流水
 <!-- 格式：- YYYY-MM-DD HH:mm <author> <新增|更新|标注矛盾> <wiki 路径> ← <raw 路径> -->
 `
 
+/**
+ * 库约定（schema.md，每库一份）读写：人工编辑入口的受控写路径。
+ * 约定是 kb-bot 自动蒸馏与交互 agent 加工的最终权威——每库改自己的，
+ * 互不影响；白名单固定 schema.md（软链越界拒绝），原子写。
+ */
+function readSchema(root) {
+  try {
+    const abs = resolveExisting(root, SCHEMA_FILE, 'file')
+    return { exists: true, text: fs.readFileSync(abs, 'utf8') }
+  } catch (e) {
+    if (e instanceof KbError && e.status === 404) return { exists: false, text: BOOT_SCHEMA }
+    throw e
+  }
+}
+
+function writeSchema(root, text) {
+  if (typeof text !== 'string' || !text.trim()) throw new KbError(400, '约定内容不能为空')
+  const body = Buffer.from(text, 'utf8')
+  if (body.length > SCHEMA_MAX_BYTES) throw new KbError(413, `超过大小上限 ${SCHEMA_MAX_BYTES} 字节`)
+  const abs = resolveCreatable(root, SCHEMA_FILE)
+  const tmp = `${abs}.dsh-tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`
+  try {
+    fs.writeFileSync(tmp, body)
+    fs.renameSync(tmp, abs)
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }) } catch {}
+    throw e
+  }
+  return { size: body.length }
+}
+
 /** 骨架自举：目录 + 三个约定文件，已存在的一律不覆盖。返回新建内容列表。 */
 function bootstrap(root, logger = { info() {}, warn() {} }) {
   const rootAbs = ensureRoot(root)
@@ -505,11 +539,12 @@ function defaultRoot() {
 
 module.exports = {
   VERSION, KbError,
-  RAW_DIR, WIKI_DIR, BOOT_DIRS, BOOT_FILES,
+  RAW_DIR, WIKI_DIR, SCHEMA_FILE, SCHEMA_MAX_BYTES, BOOT_DIRS, BOOT_FILES,
   TEXT_EXT, walkFiles,
   REGISTRY_VERSION, loadKbRegistry, saveKbRegistry, newKbId, normalizeKbRoot, kbRootsOverlap,
   ensureRoot, resolveExisting, resolveCreatable, lexicalAbs, cleanSegment,
   listDir, parseFrontmatter, readDoc, sendFile, search, uploadRaw,
+  readSchema, writeSchema,
   statusPayload, bootstrap, defaultRoot,
   BOOT_INDEX, BOOT_LOG, BOOT_SCHEMA,
 }

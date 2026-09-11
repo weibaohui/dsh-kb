@@ -175,3 +175,48 @@ test('normalizeKbRoot：目录不存在时自动创建', async (t) => {
   assert.strictEqual(core.normalizeKbRoot(os.homedir(), os.homedir()).ok, false)
   assert.strictEqual(core.normalizeKbRoot('', os.homedir()).ok, false)
 })
+
+test('readSchema：缺失回退默认模板；bootstrap 后读原文（含 frontmatter）', () => {
+  const empty = tmpRoot()
+  const missing = core.readSchema(empty)
+  assert.equal(missing.exists, false)
+  assert.ok(missing.text.includes('KB 约定'), '回退默认模板')
+
+  const root = tmpRoot()
+  core.bootstrap(root)
+  const s = core.readSchema(root)
+  assert.equal(s.exists, true)
+  assert.ok(s.text.startsWith('---'), '原文含 frontmatter（区别于 /doc 的剥离渲染）')
+})
+
+test('writeSchema：写入回读一致、原子替换；空内容/超限/软链越界拒绝', (t) => {
+  const root = tmpRoot()
+  core.bootstrap(root)
+  const custom = '---\ntitle: 解决方案库约定\n---\n\n# 本库只收「解决方案」形态，页面规范自定\n'
+  const r = core.writeSchema(root, custom)
+  assert.ok(r.size > 0)
+  const back = core.readSchema(root)
+  assert.equal(back.exists, true)
+  assert.equal(back.text, custom)
+
+  // 空内容
+  assert.throws(() => core.writeSchema(root, '   '), /不能为空/)
+  assert.throws(() => core.writeSchema(root, null), /不能为空/)
+  // 超限
+  const big = 'x'.repeat(core.SCHEMA_MAX_BYTES + 1)
+  assert.throws(() => core.writeSchema(root, big), /大小上限/)
+  // schema.md 被换成指向库外的软链 → 拒绝
+  const outside = path.join(path.dirname(root), path.basename(root) + '-schema-out.md')
+  fs.writeFileSync(outside, 'secret', 'utf8')
+  try {
+    fs.rmSync(path.join(root, 'schema.md'))
+    fs.symlinkSync(outside, path.join(root, 'schema.md'))
+    assert.throws(() => core.writeSchema(root, 'hijack'), /符号链接越界|路径越界/)
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'secret', '库外文件未被改动')
+  } finally {
+    fs.rmSync(outside, { force: true })
+  }
+  // 无残留临时文件
+  const leftovers = fs.readdirSync(root).filter((n) => n.includes('dsh-tmp'))
+  assert.deepEqual(leftovers, [])
+})

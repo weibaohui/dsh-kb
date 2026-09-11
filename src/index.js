@@ -8,7 +8,8 @@
  *  - 同源路由 /dsh-kb/api/*：status / tree / doc / file / search / upload / queue*，
  *    全部以知识库根为界（kb-core 双重边界拒绝越界与软链逃逸）；
  *  - 无独立端口、无 token/限流——只服务本机 dsh Web GUI（登录门禁由宿主用户体系负责）；
- *  - 写路径两条：upload 到 raw/（人）+ 自动蒸馏的 wiki 成文（kb-bot agent 会话）。
+ *  - 写路径三条：upload 到 raw/（人）+ 自动蒸馏的 wiki 成文（kb-bot agent 会话）
+ *    + 库约定 schema.md 的人工编辑（GET/PUT /schema，白名单只此一个文件）。
  *
  * 自动蒸馏（v0.2，设计文档 dsh-kb-auto-distill-design.md）：
  *  - 入料检测：upload 钩子 + raw/ fs.watch（200ms 防抖）+ 周期兜底扫描；
@@ -375,6 +376,22 @@ module.exports = {
               if (req.method === 'GET' && rest === '/search') {
                 const result = await core.search(kb.root, q.get('q') || '')
                 sendJson(res, 200, { ok: true, ...result })
+                return
+              }
+              // ── 库约定 schema.md（每库一份，kb-bot/交互 agent 的最终权威） ──
+              if (req.method === 'GET' && rest === '/schema') {
+                sendJson(res, 200, { ok: true, kb: kb.id, ...core.readSchema(kb.root) })
+                return
+              }
+              if (req.method === 'GET' && rest === '/schema/default') {
+                sendJson(res, 200, { ok: true, text: core.BOOT_SCHEMA })
+                return
+              }
+              if (req.method === 'PUT' && rest === '/schema') {
+                if (kb.kind !== 'material') { sendJson(res, 403, { ok: false, error: '产出库只读，不支持编辑约定' }); return }
+                const body = JSON.parse((await readBody(req, 512 * 1024)) || '{}')
+                const r = core.writeSchema(kb.root, body.text)
+                sendJson(res, 200, { ok: true, kb: kb.id, ...r })
                 return
               }
               if (req.method === 'POST' && rest === '/upload') {
