@@ -249,12 +249,15 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
 }
 
 /**
- * 反馈处理 worker：串行后台会话，逐条消化 [open] 反馈。
+ * 反馈处理 worker：后台常驻一个会话，反馈逐条进该会话串行消化。
  * 会话装配与蒸馏 runner 同款（preset mount + workspace-write + approval never）；
+ * 会话懒创建、宿主本次运行期内复用（会话列表只占一条「KB 反馈处理」）；
  * 与蒸馏队列各自串行——跨车道的 index/log 并发由 SKILL.md 的先读后写纪律兜底。
  */
 function createFeedbackWorker({ ctx, readAuto, logger }) {
   const tasks = []
+  let agent = null            // 常驻会话句柄（宿主重启即失效，下个任务重建）
+  let sessionId = null
   let busy = false
 
   const selectionOf = () => {
@@ -266,7 +269,7 @@ function createFeedbackWorker({ ctx, readAuto, logger }) {
     return sel && sel.provider && sel.model ? sel : null
   }
 
-  const snapshot = () => tasks.map((t) => ({ runId: t.runId, kbId: t.kbId, rel: t.rel, note: t.note, state: t.state, error: t.error, at: t.at }))
+  const snapshot = () => tasks.map((t) => ({ runId: t.runId, kbId: t.kbId, rel: t.rel, note: t.note, state: t.state, error: t.error, at: t.at, sessionId }))
 
   /** 执行器是否就绪（供路由决定是否降级为「写入输入框」）。 */
   const available = () => !!(ctx.agents && typeof ctx.agents.create === 'function' && selectionOf())
@@ -275,7 +278,7 @@ function createFeedbackWorker({ ctx, readAuto, logger }) {
     const t = {
       runId: 'fb-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
       kbId: kb.id, kbRoot: kb.root, rel, note,
-      state: 'queued', error: null, at: new Date().toISOString(), sessionId: null,
+      state: 'queued', error: null, at: new Date().toISOString(),
     }
     tasks.unshift(t)
     if (tasks.length > 50) tasks.length = 50
@@ -283,16 +286,17 @@ function createFeedbackWorker({ ctx, readAuto, logger }) {
     return t
   }
 
-  async function runOne(t) {
+  /** 确保常驻会话存在（宿主运行期内复用；失效/未建则重建）。 */
+  async function ensureAgent(kbRoot) {
+    if (agent) return agent
     const agents = ctx.agents
     const sel = selectionOf()
     if (!agents || typeof agents.create !== 'function' || !sel) throw new queueCore.ExecutorUnavailableError('agents/模型不可用')
-    const sessionId = `kb-feedback-${t.runId}`
-    let agent
+    sessionId = `kb-feedback-${Date.now().toString(36)}`
     try {
       const created = await agents.create({
         sessionId,
-        meta: { cwd: t.kbRoot },
+        meta: { cwd: kbRoot },
         agentOptions: { provider: sel.provider, model: sel.model },
         setup: async (agentCtx) => {
           const presets = typeof ctx.get === 'function' ? ctx.get('agentPresets') : undefined
@@ -303,24 +307,49 @@ function createFeedbackWorker({ ctx, readAuto, logger }) {
       })
       agent = created && created.agent
     } catch (e) {
+      agent = null
+      sessionId = null
       throw new queueCore.ExecutorUnavailableError(`agents.create 失败：${(e && e.message) || e}`)
     }
-    if (!agent) throw new queueCore.ExecutorUnavailableError('agents.create 未返回会话')
-    t.sessionId = sessionId
-    try { agent.session.append('session/title', { title: `KB 反馈 · ${t.rel.split('/').pop()}`, messageSeqs: [], source: { kind: 'user' } }) } catch {}
+    if (!agent) {
+      agent = null
+      sessionId = null
+      throw new queueCore.ExecutorUnavailableError('agents.create 未返回会话')
+    }
+    try { agent.session.append('session/title', { title: 'KB 反馈处理', messageSeqs: [], source: { kind: 'user' } }) } catch {}
     try {
       agent.session.append('sandbox/mode', { mode: 'workspace-write' })
       agent.session.append('approval/policy', { policy: 'never' })
     } catch {}
-    agent.followup({
+    logger.info(`dsh-kb: 反馈常驻会话就绪 ${sessionId}`)
+    return agent
+  }
+
+  async function runOne(t) {
+    const a = await ensureAgent(t.kbRoot)
+    t.sessionId = sessionId
+    a.followup({
       id: randomUUID(),
       role: 'user',
       content: [{ type: 'text', text: queueCore.buildFeedbackPrompt(t) }],
       source: { kind: 'plugin', plugin: 'dsh-kb' },
     })
-    logger.info(`dsh-kb: [${t.runId}] 反馈会话就绪，开始处理 ${t.rel}`)
-    await agent.whenIdle()
-    try { if (ctx.sessions && typeof ctx.sessions.flush === 'function') await ctx.sessions.flush(agent.session) } catch {}
+    logger.info(`dsh-kb: [${t.runId}] 反馈已发常驻会话，处理 ${t.rel}`)
+    // 超时保护：超时视为失败并弃用会话（下个任务重建），避免 busy 卡死
+    const timeoutMs = Math.max(1, Number(readAuto().timeoutMin) || 20) * 60 * 1000
+    let timedout = false
+    const timer = setTimeout(() => { timedout = true; try { if (typeof a.stop === 'function') a.stop() } catch {} }, timeoutMs)
+    if (typeof timer.unref === 'function') timer.unref()
+    try {
+      await a.whenIdle()
+    } finally {
+      clearTimeout(timer)
+    }
+    if (timedout) {
+      agent = null
+      sessionId = null
+      throw new Error(`反馈处理超时（${Math.round(timeoutMs / 60000)} 分钟），会话已重置`)
+    }
   }
 
   async function pump() {
@@ -336,6 +365,8 @@ function createFeedbackWorker({ ctx, readAuto, logger }) {
     } catch (e) {
       t.state = 'failed'
       t.error = String((e && e.message) || e).slice(0, 300)
+      // 会话级异常（创建失败/行为异常）弃用重建；普通失败保留会话继续用
+      if (e instanceof queueCore.ExecutorUnavailableError) { agent = null; sessionId = null }
       logger.warn(`dsh-kb: [${t.runId}] 反馈处理失败：${t.error}`)
     }
     busy = false
