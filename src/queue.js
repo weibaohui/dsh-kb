@@ -175,6 +175,27 @@ function buildDistillPrompt(item, rootAbs) {
 }
 
 /**
+ * 反馈处理 prompt（自包含，不依赖会话上下文；规则与 schema.md 一致）。
+ * 由后台串行 worker 执行：核实反馈 → 修页面 → 把 feedback.md 该行 [open] 改 [done]/[wontfix]。
+ */
+function buildFeedbackPrompt(t) {
+  return [
+    '你是 dsh-kb 的反馈处理 bot（author 写 kb-bot）。用户对库内页面提交了反馈，由你核实并修正。',
+    `知识库根目录：${(t && t.kbRoot) || '(未知)'}`,
+    `反馈页面：${(t && t.rel) || ''}`,
+    `反馈内容：${(t && t.note) || ''}`,
+    '',
+    '第一步必须读知识库根目录下的 schema.md（最终权威）与 index.md。',
+    '- 读反馈对应页面并核实：反馈成立则按 schema 修正页面（frontmatter updated 改今天，log.md 记一行「更新」，均先读后写）',
+    '- 反馈不成立/无需改动：不改页面',
+    '- 处理完成后编辑 wiki/meta/feedback.md：找到本条反馈行（页面路径与内容都匹配的那行），把其中的 [open] 改成 [done]；若你认为反馈不成立，改成 [wontfix] 并在行尾加一句理由。其他行一律不动（先读后写）',
+    '- raw/ 不可变；不得删除 wiki/ 下文件',
+    '',
+    '最终回复的最后一行输出 JSON：{"status":"done|wontfix|noop","page":"<改动的页面相对路径，没有则空字符串>"}',
+  ].join('\n')
+}
+
+/**
  * 按标题边界把 markdown 切成 ≤target 的片（单片超限按字符硬切、行尾对齐）。
  * 返回 [{title, body}]；字符偏移全程以 src 计。
  */
@@ -626,7 +647,7 @@ function createQueue({ root, rootOf, ledgerFile, runner, logger = { info() {}, w
 }
 
 module.exports = {
-  createQueue, ExecutorUnavailableError, buildDistillPrompt, extractJsonTail,
+  createQueue, ExecutorUnavailableError, buildDistillPrompt, buildFeedbackPrompt, extractJsonTail,
   fingerprint, wikiSnapshot, diffWiki, collectWikiSources, splitMarkdown,
   resolveRouteOverride, sanitizeAutoPatch,
   RETRY_BASE_MS, DONE_KEEP, CHUNK_THRESHOLD, CHUNK_TARGET,

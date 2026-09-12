@@ -248,6 +248,103 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
   }
 }
 
+/**
+ * 反馈处理 worker：串行后台会话，逐条消化 [open] 反馈。
+ * 会话装配与蒸馏 runner 同款（preset mount + workspace-write + approval never）；
+ * 与蒸馏队列各自串行——跨车道的 index/log 并发由 SKILL.md 的先读后写纪律兜底。
+ */
+function createFeedbackWorker({ ctx, readAuto, logger }) {
+  const tasks = []
+  let busy = false
+
+  const selectionOf = () => {
+    const cfg = readAuto()
+    let sel = queueCore.resolveRouteOverride(cfg.provider, cfg.model)
+    if (!sel) {
+      try { sel = ctx.agentDefaultModel && ctx.agentDefaultModel.currentSelection() } catch { sel = null }
+    }
+    return sel && sel.provider && sel.model ? sel : null
+  }
+
+  const snapshot = () => tasks.map((t) => ({ runId: t.runId, kbId: t.kbId, rel: t.rel, note: t.note, state: t.state, error: t.error, at: t.at }))
+
+  /** 执行器是否就绪（供路由决定是否降级为「写入输入框」）。 */
+  const available = () => !!(ctx.agents && typeof ctx.agents.create === 'function' && selectionOf())
+
+  function enqueue(kb, rel, note) {
+    const t = {
+      runId: 'fb-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+      kbId: kb.id, kbRoot: kb.root, rel, note,
+      state: 'queued', error: null, at: new Date().toISOString(), sessionId: null,
+    }
+    tasks.unshift(t)
+    if (tasks.length > 50) tasks.length = 50
+    setImmediate(() => pump().catch((e) => logger.error(`dsh-kb: 反馈 worker 异常：${(e && e.stack) || e}`)))
+    return t
+  }
+
+  async function runOne(t) {
+    const agents = ctx.agents
+    const sel = selectionOf()
+    if (!agents || typeof agents.create !== 'function' || !sel) throw new queueCore.ExecutorUnavailableError('agents/模型不可用')
+    const sessionId = `kb-feedback-${t.runId}`
+    let agent
+    try {
+      const created = await agents.create({
+        sessionId,
+        meta: { cwd: t.kbRoot },
+        agentOptions: { provider: sel.provider, model: sel.model },
+        setup: async (agentCtx) => {
+          const presets = typeof ctx.get === 'function' ? ctx.get('agentPresets') : undefined
+          if (!presets || typeof presets.resolve !== 'function' || typeof presets.mount !== 'function') return
+          const resolved = await presets.resolve(undefined)
+          if (resolved && resolved.id) await presets.mount(agentCtx, resolved.id)
+        },
+      })
+      agent = created && created.agent
+    } catch (e) {
+      throw new queueCore.ExecutorUnavailableError(`agents.create 失败：${(e && e.message) || e}`)
+    }
+    if (!agent) throw new queueCore.ExecutorUnavailableError('agents.create 未返回会话')
+    t.sessionId = sessionId
+    try { agent.session.append('session/title', { title: `KB 反馈 · ${t.rel.split('/').pop()}`, messageSeqs: [], source: { kind: 'user' } }) } catch {}
+    try {
+      agent.session.append('sandbox/mode', { mode: 'workspace-write' })
+      agent.session.append('approval/policy', { policy: 'never' })
+    } catch {}
+    agent.followup({
+      id: randomUUID(),
+      role: 'user',
+      content: [{ type: 'text', text: queueCore.buildFeedbackPrompt(t) }],
+      source: { kind: 'plugin', plugin: 'dsh-kb' },
+    })
+    logger.info(`dsh-kb: [${t.runId}] 反馈会话就绪，开始处理 ${t.rel}`)
+    await agent.whenIdle()
+    try { if (ctx.sessions && typeof ctx.sessions.flush === 'function') await ctx.sessions.flush(agent.session) } catch {}
+  }
+
+  async function pump() {
+    if (busy) return
+    const t = tasks.find((x) => x.state === 'queued')
+    if (!t) return
+    busy = true
+    t.state = 'running'
+    try {
+      await runOne(t)
+      t.state = 'done'
+      logger.info(`dsh-kb: [${t.runId}] 反馈处理完成 ${t.rel}`)
+    } catch (e) {
+      t.state = 'failed'
+      t.error = String((e && e.message) || e).slice(0, 300)
+      logger.warn(`dsh-kb: [${t.runId}] 反馈处理失败：${t.error}`)
+    }
+    busy = false
+    setImmediate(() => pump().catch((e) => logger.error(`dsh-kb: 反馈 worker 异常：${(e && e.stack) || e}`)))
+  }
+
+  return { enqueue, available, snapshot }
+}
+
 module.exports = {
   name,
   inject,
@@ -308,6 +405,10 @@ module.exports = {
     })
     queue.resume()
     try { for (const k of distillTargets()) queue.scan(k.id) } catch (e) { logger.warn(`dsh-kb: 启动扫描失败：${(e && e.message) || e}`) }
+    queue.kick()
+
+    // 反馈后台 worker（串行；执行器缺席时路由降级为「写入输入框」）
+    const feedbackWorker = createFeedbackWorker({ ctx, readAuto, logger })
     queue.kick()
 
     // raw/ 监视（200ms 防抖）：主库 + 每个素材库各一个；watcher 不可靠的文件系统由 sweep 覆盖
@@ -425,12 +526,22 @@ module.exports = {
                 sendJson(res, 200, { ok: true, ...r })
                 return
               }
-              // ── 页面反馈（追加进本库 wiki/meta/feedback.md） ──
+              // ── 页面反馈（追加进本库 wiki/meta/feedback.md；auto=true 时后台会话自动处理） ──
               if (req.method === 'POST' && rest === '/feedback') {
                 if (kb.kind !== 'material') { sendJson(res, 403, { ok: false, error: '产出库只读，不支持反馈' }); return }
                 const body = JSON.parse((await readBody(req)) || '{}')
                 const r = core.appendFeedback(kb.root, body.path, body.note)
-                sendJson(res, 200, { ok: true, ...r })
+                let run = null
+                let reason = null
+                if (body.auto === true) {
+                  if (feedbackWorker.available()) run = { runId: feedbackWorker.enqueue(kb, body.path, body.note).runId }
+                  else reason = 'executor-unavailable'
+                }
+                sendJson(res, 200, { ok: true, ...r, run, reason })
+                return
+              }
+              if (req.method === 'GET' && rest === '/feedback/status') {
+                sendJson(res, 200, { ok: true, tasks: feedbackWorker.snapshot() })
                 return
               }
               if (req.method === 'POST' && rest === '/upload') {
@@ -507,7 +618,7 @@ module.exports = {
                   ? { provider: route.provider, model: route.model, source: override ? 'override' : 'default' }
                   : null
                 const snap = queue.snapshot()
-                sendJson(res, 200, { ok: true, enabled: cfg.enabled, route, ledger: ledgerFile, ...snap })
+                sendJson(res, 200, { ok: true, enabled: cfg.enabled, route, ledger: ledgerFile, ...snap, feedback: feedbackWorker.snapshot() })
                 return
               }
               // GET /models — 设置页模型下拉的目录（llm.listProviders + 逐家 listModels；缺席降级空目录）

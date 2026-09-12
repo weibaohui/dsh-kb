@@ -517,7 +517,7 @@ function DocView(props) {
       h('button', { className: 'kb-btn', onClick: () => onAt(rel) }, '@ 给 agent'),
       rel === 'schema.md' && props.onEditSchema ? h('button', { className: 'kb-btn', title: '编辑本库的加工约定（每库独立）', onClick: props.onEditSchema }, '✏️ 编辑约定') : null,
       inWiki && isMd ? h('button', { className: 'kb-btn', title: '查看本页的修改历史,可恢复旧版本', onClick: () => onNav({ kind: 'history', rel }) }, '🕐 历史') : null,
-      isMd && props.onFeedback ? h('button', { className: 'kb-btn', title: '页面内容有误或缺漏?记入反馈,可一并交给 agent 修正', onClick: () => setFb({ note: '', ask: true }) }, '⚠️ 反馈') : null,
+      isMd && props.onFeedback ? h('button', { className: 'kb-btn', title: '页面内容有误或缺漏?记入反馈,后台 agent 自动核实修正', onClick: () => setFb({ note: '', ask: true }) }, '⚠️ 反馈') : null,
       doc.kind !== 'binary' ? h('a', { className: 'kb-btn', style: { textDecoration: 'none' }, href: apiFile(rel, true), title: '下载/导出本页' }, '⬇ 下载') : null,
       doc.kind === 'binary' ? h('a', { className: 'kb-btn', style: { textDecoration: 'none' }, href: apiFile(rel, true) }, '下载') : null,
       inRaw ? h('label', { className: 'kb-btn', style: { cursor: 'pointer' }, title: '上传到 ' + (dirOf || 'raw') },
@@ -535,7 +535,7 @@ function DocView(props) {
         }),
         h('label', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
           h('input', { type: 'checkbox', checked: fb.ask, onChange: (e) => setFb((f) => ({ ...f, ask: e.target.checked })) }),
-          '记录后立即交给 agent 修正（写入输入框,发送即执行）',
+          '提交后自动交给 agent 后台处理（修完自动标 [done]，进度见蒸馏队列面板）',
         ),
         h('div', { className: 'kb-modal-acts' },
           h('button', { className: 'kb-btn', onClick: () => setFb(null) }, '取消'),
@@ -719,6 +719,7 @@ function SearchView(props) {
 
 /** 蒸馏队列状态 chip 文案。 */
 const Q_STATUS_LABEL = { queued: '排队', running: '蒸馏中', done: '完成', failed: '失败', skipped: '跳过' }
+const FB_STATUS_LABEL = { queued: '排队', running: '处理中', done: '完成', failed: '失败' }
 
 /** 跳到 bot 会话（客户端 sessions 服务 open(id)，dsh-process 同款懒解析）。 */
 function openKbSession(sessionId, hint) {
@@ -738,7 +739,27 @@ function QueueView(props) {
   const statChips = ['running', 'queued', 'failed', 'done', 'skipped'].map((k) =>
     h('span', { className: `kb-chip ${k}`, key: k }, `${Q_STATUS_LABEL[k]} ${stats[k] || 0}`))
   const items = data.items || []
+  const fbTasks = data.feedback || []
   return h('div', null,
+    fbTasks.length ? h('div', null,
+      h('div', { className: 'kb-q-model', style: { fontWeight: 600 } }, '⚠️ 反馈处理（后台自动，完成自动标 [done]）'),
+      fbTasks.map((t) => h('div', { className: 'kb-q-row', key: t.runId },
+        h('div', { className: 'kb-q-main' },
+          h('div', { className: 'kb-q-name' },
+            h('span', { className: `kb-chip ${t.state === 'running' ? 'running' : t.state === 'done' ? 'done' : t.state === 'failed' ? 'failed' : 'queued'}` }, FB_STATUS_LABEL[t.state] || t.state),
+            ' ', t.rel.split('/').pop(),
+          ),
+          h('div', { className: 'kb-q-rel' }, `[${kbName(t.kbId)}] ${t.rel}`),
+          t.note ? h('div', { className: `kb-q-note${t.state === 'failed' ? ' err' : ''}`, title: t.note }, t.note) : null,
+          t.error ? h('div', { className: 'kb-q-note err' }, t.error) : null,
+        ),
+        h('div', { className: 'kb-q-side' },
+          h('span', { className: 'kb-q-time' }, fmtTime(Date.parse(t.at))),
+          t.sessionId && t.state !== 'queued' ? h('div', { className: 'kb-q-acts' },
+            h('button', { className: 'kb-btn', onClick: () => openKbSession(t.sessionId, onHint) }, '打开会话')) : null,
+        ),
+      )),
+    ) : null,
     h('div', { className: 'kb-q-head' },
       h('div', { className: 'kb-q-stats' }, statChips,
         data.enabled === false ? h('span', { className: 'kb-chip skipped' }, '自动蒸馏已停用（设置）') : null,
@@ -1308,20 +1329,23 @@ function KbPage() {
     } else showHint('问题已写入输入框,发送即让 agent 带检索回答 🤖')
   }
 
-  // 页面反馈:记录进本库 wiki/meta/feedback.md;勾选「交给 agent」时顺带把处理指令写入输入框
-  const submitFeedback = async (rel, note, ask) => {
+  // 页面反馈:记录进本库 wiki/meta/feedback.md;勾选自动处理时由后台会话执行,执行器缺席降级为写入输入框
+  const submitFeedback = async (rel, note, auto) => {
     try {
-      await readJson(await fetch(`${API}/feedback?kb=${encodeURIComponent(kbId)}`, {
+      const d = await readJson(await fetch(`${API}/feedback?kb=${encodeURIComponent(kbId)}`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ path: rel, note }),
+        body: JSON.stringify({ path: rel, note, auto: auto === true }),
       }))
       setReloadTick((t) => t + 1)
-      if (!ask) { showHint('反馈已记入 wiki/meta/feedback.md ✅'); return }
+      if (!auto) { showHint('反馈已记入 wiki/meta/feedback.md ✅（可稍后 @ 给 agent 处理）'); return }
+      if (d.run) { showHint('已交给 agent 后台处理 🤖 修完自动标 [done]（进度见蒸馏队列面板）'); return }
+      // 执行器不可用：降级为 composer 指令
       const root = status && status.root ? String(status.root).replace(/\/+$/, '') : ''
+      const instruction = `@${root}/${rel} 请核查这条反馈:「${note}」。按当前库 schema 修正页面后,把 wiki/meta/feedback.md 里对应行的 [open] 改为 [done]。`
       setOpen(false)
-      const r = insertTextViaDom(`@${root}/${rel} 请核查这条反馈:「${note}」。按当前库 schema 修正页面后,把 wiki/meta/feedback.md 里对应行的 [open] 改为 [done]。`)
-      showHint(r === true ? '反馈已记录,处理指令已写入输入框,发送即执行 ⚠️🤖' : '反馈已记录;指令已复制到剪贴板,请粘贴到输入框发送')
-      if (r !== true) { try { await navigator.clipboard.writeText(`@${root}/${rel} 请核查这条反馈:「${note}」`) } catch {} }
+      const r = insertTextViaDom(instruction)
+      if (r !== true) { try { await navigator.clipboard.writeText(instruction) } catch {} }
+      showHint(r === true ? '执行器不可用,处理指令已写入输入框,发送即执行 ⚠️' : '执行器不可用,指令已复制到剪贴板,请粘贴发送')
     } catch (e) { showHint('反馈失败：' + ((e && e.message) || e)) }
   }
 
