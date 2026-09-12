@@ -17,7 +17,9 @@ window.__ModuleLoader__.load({
      *  - 左栏：快捷入口（index/log/schema）+ wiki/ 与 raw/ 懒加载目录树 + 多库切换器；
      *  - 右栏：markdown 阅读渲染（frontmatter 徽章、[[wikilink]]、内部链接、图片、代码块）、
      *    全文搜索结果（内置扫描引擎，命中高亮）、蒸馏队列面板、
-     *    库约定编辑器（schema.md，每库一份：⌘S 保存 / 恢复默认模板）；
+     *    库约定编辑器（schema.md，每库一份：⌘S 保存 / 恢复默认模板）、
+     *    wiki 版本历史（查看/恢复快照）、页面反馈（记入 feedback.md 可交 agent）、
+     *    「🤖 问 AI」（检索命中拼 prompt 写入输入框）、陈旧标记（>90 天未更新）；
      *  - raw/ 下可上传素材，任意条目可「@ 给 agent」注入 composer
      *    （先关 overlay 再注入，composer 不可得时退化为复制到剪贴板）。
      *
@@ -81,6 +83,7 @@ window.__ModuleLoader__.load({
     .kb-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 6px}
     .kb-chip{font-size:11px;line-height:1.6;border-radius:999px;padding:1px 10px;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}
     .kb-chip.title{color:var(--dsw-alias-brand-primary);border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 35%,var(--dsw-alias-border-l2));font-weight:600}
+    .kb-chip.stale{color:#b7791f;border-color:color-mix(in srgb,#b7791f 45%,var(--dsw-alias-border-l2));background:color-mix(in srgb,#b7791f 8%,transparent)}
     .kb-docbar{display:flex;gap:8px;align-items:center;padding:0 0 10px;border-bottom:1px solid var(--dsw-alias-border-l2);margin-bottom:14px}
     .kb-docpath{font-size:11px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-family:var(--ds-font-family-code,ui-monospace,monospace);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     /* markdown 渲染 */
@@ -481,6 +484,7 @@ window.__ModuleLoader__.load({
       const h = React.createElement
       const { rel, root, onNav, onAt, reloadTick, kb } = props
       const [state, setState] = React.useState({ status: 'loading' })
+      const [fb, setFb] = React.useState(null) // null | {note, ask} 反馈对话框
 
       React.useEffect(() => {
         let alive = true
@@ -497,13 +501,24 @@ window.__ModuleLoader__.load({
       const doc = state.doc
       const fm = doc.frontmatter || {}
       const inRaw = rel === 'raw' || rel.startsWith('raw/')
+      const inWiki = rel === 'wiki' || rel.startsWith('wiki/')
+      const isMd = doc.kind === 'md'
       const dirOf = rel.indexOf('/') >= 0 ? rel.slice(0, rel.lastIndexOf('/')) : ''
+
+      // 陈旧提示：frontmatter updated（缺省退回文件 mtime）超过 90 天
+      const staleDays = (() => {
+        const t = Date.parse(fm.updated || '') || (doc.mtime || 0)
+        if (!t) return null
+        const d = Math.floor((Date.now() - t) / 86400000)
+        return d >= 90 ? d : null
+      })()
 
       const meta = []
       if (fm.title) meta.push(h('span', { className: 'kb-chip title', key: 't' }, fm.title))
       if (fm.author) meta.push(h('span', { className: 'kb-chip', key: 'a' }, '👤 ' + fm.author))
       if (fm.updated) meta.push(h('span', { className: 'kb-chip', key: 'u' }, '更新 ' + fm.updated))
       if (Array.isArray(fm.tags) && fm.tags.length) fm.tags.forEach((t, i) => meta.push(h('span', { className: 'kb-chip', key: 'g' + i }, '#' + t)))
+      if (staleDays !== null) meta.push(h('span', { className: 'kb-chip stale', key: 's', title: '内容可能过时,建议核对或交 agent 复查' }, `⏳ ${staleDays} 天未更新`))
 
       return h('div', null,
         meta.length ? h('div', { className: 'kb-meta' }, meta) : null,
@@ -511,10 +526,32 @@ window.__ModuleLoader__.load({
           h('span', { className: 'kb-docpath', title: rel }, rel + (doc.size != null ? ' · ' + fmtSize(doc.size) : '') + (doc.mtime ? ' · ' + fmtTime(doc.mtime) : '')),
           h('button', { className: 'kb-btn', onClick: () => onAt(rel) }, '@ 给 agent'),
           rel === 'schema.md' && props.onEditSchema ? h('button', { className: 'kb-btn', title: '编辑本库的加工约定（每库独立）', onClick: props.onEditSchema }, '✏️ 编辑约定') : null,
+          inWiki && isMd ? h('button', { className: 'kb-btn', title: '查看本页的修改历史,可恢复旧版本', onClick: () => onNav({ kind: 'history', rel }) }, '🕐 历史') : null,
+          isMd && props.onFeedback ? h('button', { className: 'kb-btn', title: '页面内容有误或缺漏?记入反馈,可一并交给 agent 修正', onClick: () => setFb({ note: '', ask: true }) }, '⚠️ 反馈') : null,
+          doc.kind !== 'binary' ? h('a', { className: 'kb-btn', style: { textDecoration: 'none' }, href: apiFile(rel, true), title: '下载/导出本页' }, '⬇ 下载') : null,
           doc.kind === 'binary' ? h('a', { className: 'kb-btn', style: { textDecoration: 'none' }, href: apiFile(rel, true) }, '下载') : null,
           inRaw ? h('label', { className: 'kb-btn', style: { cursor: 'pointer' }, title: '上传到 ' + (dirOf || 'raw') },
             '上传素材', h('input', { type: 'file', multiple: true, className: 'kb-file', onChange: (e) => props.onUpload(dirOf || 'raw', e.target.files), key: 'up' + rel + String(props.uploadTick || 0) }),
           ) : null,
+        ),
+        // 反馈对话框
+        fb && h('div', { className: 'kb-modal-mask', onMouseDown: (e) => { if (e.target === e.currentTarget) setFb(null) } },
+          h('div', { className: 'kb-modal', role: 'dialog', 'aria-label': '页面反馈' },
+            h('p', { className: 'kb-modal-h' }, '⚠️ 反馈：' + (fm.title || rel)),
+            h('textarea', {
+              className: 'kb-schema-ta', style: { height: 120, minHeight: 120, resize: 'vertical' },
+              placeholder: '哪里有误/缺了什么/该补充什么…', autoFocus: true, value: fb.note,
+              onChange: (e) => setFb((f) => ({ ...f, note: e.target.value })),
+            }),
+            h('label', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
+              h('input', { type: 'checkbox', checked: fb.ask, onChange: (e) => setFb((f) => ({ ...f, ask: e.target.checked })) }),
+              '记录后立即交给 agent 修正（写入输入框,发送即执行）',
+            ),
+            h('div', { className: 'kb-modal-acts' },
+              h('button', { className: 'kb-btn', onClick: () => setFb(null) }, '取消'),
+              h('button', { className: 'kb-btn primary', disabled: !fb.note.trim(), onClick: () => { const cur = fb; setFb(null); props.onFeedback(rel, cur.note.trim(), cur.ask) } }, '提交'),
+            ),
+          ),
         ),
         doc.kind === 'md' ? h('div', { className: 'kb-md' }, renderMarkdown(doc.body, onNav)) : null,
         rel === 'index.md' ? h(RecentUpdates, { onNav, kb: props.kb }) : null,
@@ -585,6 +622,76 @@ window.__ModuleLoader__.load({
             }
           },
         }),
+      )
+    }
+
+    /** 右栏：wiki 页面版本历史（列表 → 查看/恢复）。快照由宿主 wiki/ 监视自动写入。 */
+    function HistoryView(props) {
+      const h = React.createElement
+      const { rel, kb, onNav, onHint, onRestored } = props
+      const [state, setState] = React.useState({ status: 'loading' })
+      const [viewing, setViewing] = React.useState(null) // {ts, text}
+
+      const load = React.useCallback(() => {
+        setState({ status: 'loading' })
+        fetch(`${API}/history?path=${encodeURIComponent(rel)}&kb=${encodeURIComponent(kb || 'main')}`)
+          .then(readJson)
+          .then((d) => setState({ status: 'ok', items: d.items || [] }))
+          .catch((e) => setState({ status: 'error', message: String((e && e.message) || e) }))
+      }, [rel, kb])
+      React.useEffect(() => { load() }, [load])
+
+      const view = async (ts) => {
+        try {
+          const d = await readJson(await fetch(`${API}/history/file?path=${encodeURIComponent(rel)}&ts=${encodeURIComponent(ts)}&kb=${encodeURIComponent(kb || 'main')}`))
+          setViewing({ ts, text: d.text })
+        } catch (e) { onHint('读取版本失败：' + ((e && e.message) || e)) }
+      }
+
+      const restore = async (ts) => {
+        if (!window.confirm(`把「${rel}」恢复到 ${ts.slice(0, 15)} 的版本?当前内容将被覆盖(可再从历史恢复回来)。`)) return
+        try {
+          await readJson(await fetch(`${API}/history/restore?kb=${encodeURIComponent(kb || 'main')}`, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: rel, ts }),
+          }))
+          onHint('已恢复该版本 ✅')
+          onRestored()
+          onNav({ kind: 'doc', rel })
+        } catch (e) { onHint('恢复失败：' + ((e && e.message) || e)) }
+      }
+
+      const fmtTs = (f) => {
+        const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/.exec(f)
+        return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : f
+      }
+
+      if (state.status === 'loading') return h('div', { className: 'kb-spin' }, '加载中…')
+      if (state.status === 'error') return h('div', { className: 'kb-err' }, '读取失败：' + state.message)
+      return h('div', { className: 'kb-md', style: { maxWidth: 860 } },
+        h('div', { className: 'kb-docbar' },
+          h('span', { className: 'kb-docpath' }, `🕐 ${rel} 的版本历史（${state.items.length}）`),
+          h('button', { className: 'kb-btn', onClick: () => onNav({ kind: 'doc', rel }) }, '← 返回页面'),
+          h('button', { className: 'kb-btn', onClick: load }, '刷新'),
+        ),
+        state.items.length === 0 ? h('div', { className: 'kb-empty' }, '还没有历史版本。页面被修改后,宿主会自动快照(内容有变化才记一个版本)。') : null,
+        viewing ? h('div', null,
+          h('div', { className: 'kb-docbar' },
+            h('span', { className: 'kb-docpath' }, '版本 ' + fmtTs(viewing.ts)),
+            h('button', { className: 'kb-btn primary', onClick: () => restore(viewing.ts) }, '恢复此版本'),
+            h('button', { className: 'kb-btn', onClick: () => setViewing(null) }, '返回列表'),
+          ),
+          h('pre', { className: 'kb-md-pre' }, viewing.text),
+        ) : h('div', null, state.items.map((it) => h('div', { className: 'kb-q-row', key: it.ts },
+          h('div', { className: 'kb-q-main' },
+            h('div', { className: 'kb-q-name' }, fmtTs(it.ts)),
+            h('div', { className: 'kb-q-rel' }, fmtSize(it.size)),
+          ),
+          h('div', { className: 'kb-q-acts' },
+            h('button', { className: 'kb-btn', onClick: () => view(it.ts) }, '查看'),
+            h('button', { className: 'kb-btn', onClick: () => restore(it.ts) }, '恢复'),
+          ),
+        ))),
       )
     }
 
@@ -1191,6 +1298,43 @@ window.__ModuleLoader__.load({
         setNav({ kind: 'search', q })
       }
 
+      // 「🤖 问 AI」：先检索当前库,把命中页 @ 引用 + 问题一起写入输入框,agent 带着依据作答
+      const askAi = async () => {
+        const q = query.trim()
+        if (!q) { showHint('先在搜索框输入问题,再点「问 AI」'); return }
+        let hits = []
+        try {
+          hits = (await readJson(await fetch(`${API}/search?q=${encodeURIComponent(q)}&kb=${encodeURIComponent(kbId)}`))).hits || []
+        } catch { /* 检索失败也给 agent 兜底指引 */ }
+        const root = status && status.root ? String(status.root).replace(/\/+$/, '') : ''
+        const tops = hits.slice(0, 5).map((x) => '@' + root + '/' + x.rel).join(' ')
+        const prompt = `请回答：${q}\n依据来自知识库（${root || '见 @ 路径'}）。`
+          + (tops ? `\n初步检索命中：${tops}。` : '\n初步检索无命中,请用工具在知识库根目录继续检索。')
+          + '\n要求：先检索核对再下结论；回答末尾列出依据（来源页面路径）；与库内条目矛盾的说法要明确指出。'
+        setOpen(false)
+        const r = insertTextViaDom(prompt)
+        if (r !== true) {
+          try { await navigator.clipboard.writeText(prompt); showHint('无法自动插入,问题已复制到剪贴板,请在输入框粘贴') } catch { showHint('插入失败,请手动把问题粘贴到输入框') }
+        } else showHint('问题已写入输入框,发送即让 agent 带检索回答 🤖')
+      }
+
+      // 页面反馈:记录进本库 wiki/meta/feedback.md;勾选「交给 agent」时顺带把处理指令写入输入框
+      const submitFeedback = async (rel, note, ask) => {
+        try {
+          await readJson(await fetch(`${API}/feedback?kb=${encodeURIComponent(kbId)}`, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: rel, note }),
+          }))
+          setReloadTick((t) => t + 1)
+          if (!ask) { showHint('反馈已记入 wiki/meta/feedback.md ✅'); return }
+          const root = status && status.root ? String(status.root).replace(/\/+$/, '') : ''
+          setOpen(false)
+          const r = insertTextViaDom(`@${root}/${rel} 请核查这条反馈:「${note}」。按当前库 schema 修正页面后,把 wiki/meta/feedback.md 里对应行的 [open] 改为 [done]。`)
+          showHint(r === true ? '反馈已记录,处理指令已写入输入框,发送即执行 ⚠️🤖' : '反馈已记录;指令已复制到剪贴板,请粘贴到输入框发送')
+          if (r !== true) { try { await navigator.clipboard.writeText(`@${root}/${rel} 请核查这条反馈:「${note}」`) } catch {} }
+        } catch (e) { showHint('反馈失败：' + ((e && e.message) || e)) }
+      }
+
       const upload = async (dir, files) => {
         if (!files || !files.length) return
         const cur = (kbs || []).find((k) => k.id === kbId)
@@ -1315,6 +1459,7 @@ window.__ModuleLoader__.load({
               onChange: (e) => setQuery(e.target.value),
               onKeyDown: (e) => { if (e.key === 'Enter' && !(e.isComposing === true)) doSearch() },
             }),
+            h('button', { className: 'kb-btn', title: '带着检索命中问 AI（写入输入框,agent 作答并附来源）', onClick: askAi }, '🤖 问 AI'),
             h('span', { className: 'kb-root', title: status && status.root }, status && status.root ? status.root : ''),
             queueBtn,
             h('label', { className: 'kb-btn primary', style: { cursor: 'pointer' }, title: '上传素材（自动蒸馏入队）' },
@@ -1349,7 +1494,8 @@ window.__ModuleLoader__.load({
             ),
             h('div', { className: 'kb-main' },
               error && h('div', { className: 'kb-err' }, error),
-              !error && nav.kind === 'doc' && h(DocView, { rel: nav.rel, root: status && status.root, kb: kbId, onNav, onAt: atRel, onUpload: upload, reloadTick, uploadTick, onEditSchema: nav.rel === 'schema.md' ? () => onNav({ kind: 'schema-edit' }) : null }),
+              !error && nav.kind === 'doc' && h(DocView, { rel: nav.rel, root: status && status.root, kb: kbId, onNav, onAt: atRel, onUpload: upload, reloadTick, uploadTick, onFeedback: submitFeedback, onEditSchema: nav.rel === 'schema.md' ? () => onNav({ kind: 'schema-edit' }) : null }),
+              !error && nav.kind === 'history' && h(HistoryView, { rel: nav.rel, kb: kbId, onNav, onHint: showHint, onRestored: () => setReloadTick((t) => t + 1) }),
               !error && nav.kind === 'schema-edit' && h(SchemaEditor, {
                 kb: kbId, kbName: curKb && curKb.name, onHint: showHint,
                 onDone: () => onNav({ kind: 'doc', rel: 'schema.md' }),

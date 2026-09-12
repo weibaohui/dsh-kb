@@ -189,8 +189,7 @@ test('readSchema：缺失回退默认模板；bootstrap 后读原文（含 front
   assert.ok(s.text.startsWith('---'), '原文含 frontmatter（区别于 /doc 的剥离渲染）')
 })
 
-test('writeSchema：写入回读一致、原子替换；空内容/超限/软链越界拒绝', (t) => {
-  const root = tmpRoot()
+test('writeSchema：写入回读一致、原子替换；空内容/超限/软链越界拒绝', (t) => {  const root = tmpRoot()
   core.bootstrap(root)
   const custom = '---\ntitle: 解决方案库约定\n---\n\n# 本库只收「解决方案」形态，页面规范自定\n'
   const r = core.writeSchema(root, custom)
@@ -219,4 +218,73 @@ test('writeSchema：写入回读一致、原子替换；空内容/超限/软链�
   // 无残留临时文件
   const leftovers = fs.readdirSync(root).filter((n) => n.includes('dsh-tmp'))
   assert.deepEqual(leftovers, [])
+})
+
+test('snapWikiTree：内容变化才入快照；list/read/restore 全链路', (t) => {
+  const root = tmpRoot()
+  core.bootstrap(root)
+  const hist = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-kb-hist-'))
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(hist, { recursive: true, force: true }) })
+  const page = path.join(root, 'wiki/howtos/a.md')
+  fs.mkdirSync(path.dirname(page), { recursive: true })
+  fs.writeFileSync(page, 'v1\n', 'utf8')
+
+  assert.equal(core.snapWikiTree(root, hist).snapped, 1, '首次快照')
+  assert.equal(core.snapWikiTree(root, hist).snapped, 0, '内容未变不重复快照')
+  fs.writeFileSync(page, 'v2\n', 'utf8')
+  assert.equal(core.snapWikiTree(root, hist).snapped, 1, '内容变化入新版本')
+
+  const items = core.listSnapshots(hist, 'wiki/howtos/a.md')
+  assert.equal(items.length, 2)
+  assert.equal(core.readSnapshot(hist, 'wiki/howtos/a.md', items[1].ts), 'v1\n', '旧版本内容')
+  assert.equal(core.readSnapshot(hist, 'wiki/howtos/a.md', items[0].ts), 'v2\n', '最新版本内容')
+
+  // 恢复旧版本 → 当前文件变回 v1
+  const r = core.restoreSnapshot(root, hist, 'wiki/howtos/a.md', items[1].ts)
+  assert.equal(r.rel, 'wiki/howtos/a.md')
+  assert.equal(fs.readFileSync(page, 'utf8'), 'v1\n')
+})
+
+test('snapWikiTree：非文本跳过、超限跳过、每文件保留上限淘汰', (t) => {
+  const root = tmpRoot()
+  core.bootstrap(root)
+  const hist = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-kb-hist-'))
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(hist, { recursive: true, force: true }) })
+  fs.writeFileSync(path.join(root, 'wiki/notes/bin.bin'), 'x', 'utf8')
+  fs.writeFileSync(path.join(root, 'wiki/notes/big.md'), 'x'.repeat(core.SNAP_MAX_BYTES + 1), 'utf8')
+  fs.writeFileSync(path.join(root, 'wiki/notes/ok.md'), 'a', 'utf8')
+  const r = core.snapWikiTree(root, hist)
+  assert.equal(r.snapped, 1, '只快照 ok.md')
+  // 超过 SNAP_KEEP 份淘汰最旧
+  const page = path.join(root, 'wiki/notes/ok.md')
+  for (let i = 0; i < core.SNAP_KEEP + 3; i++) {
+    fs.writeFileSync(page, 'v' + i, 'utf8')
+    core.snapWikiTree(root, hist)
+  }
+  const dir = path.join(hist, 'wiki/notes/ok.md')
+  assert.ok(fs.readdirSync(dir).length <= core.SNAP_KEEP, '淘汰生效')
+})
+
+test('safeWikiRel/listSnapshots/readSnapshot：非法路径与版本号拒绝', () => {
+  assert.equal(core.safeWikiRel('raw/x.md'), null)
+  assert.equal(core.safeWikiRel('wiki/../evil.md'), null)
+  assert.equal(core.safeWikiRel('index.md'), null)
+  assert.throws(() => core.listSnapshots('/tmp', 'raw/x.md'), /wiki/)
+  assert.throws(() => core.readSnapshot('/tmp', 'wiki/a.md', '../evil'), /非法版本号/)
+})
+
+test('appendFeedback：追加格式、换行清洗、空内容拒绝', (t) => {
+  const root = tmpRoot()
+  core.bootstrap(root)
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const r1 = core.appendFeedback(root, 'wiki/howtos/a.md', '步骤 2 少了一步\n第二行')
+  assert.equal(r1.feedback, 'wiki/meta/feedback.md')
+  const text = fs.readFileSync(path.join(root, 'wiki/meta/feedback.md'), 'utf8')
+  assert.ok(text.includes('[open] wiki/howtos/a.md — 步骤 2 少了一步 第二行'), text)
+  assert.ok(!text.includes('\n第二行'), '换行被清洗为空格')
+  core.appendFeedback(root, 'wiki/howtos/b.md', '还有一条')
+  const text2 = fs.readFileSync(path.join(root, 'wiki/meta/feedback.md'), 'utf8')
+  assert.equal(text2.split('\n').filter((l) => l.startsWith('- ')).length, 2, '追加不覆盖')
+  assert.throws(() => core.appendFeedback(root, 'wiki/a.md', '   '), /不能为空/)
+  assert.throws(() => core.appendFeedback(root, '../evil.md', 'x'), /非法页面路径/)
 })

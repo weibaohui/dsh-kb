@@ -473,6 +473,119 @@ function bootstrap(root, logger = { info() {}, warn() {} }) {
   return created
 }
 
+// ── 版本历史（wiki 快照，存知识库根之外：~/.dsh/dsh-kb/history/<kbId>/<rel>/<ts>.md） ──
+// wiki 由 agent/人共写且不经插件 API，无法在写路径上挂钩子——用 wiki/ 目录监视
+// 对内容变化做快照（与最新快照逐字比对，内容没变不入版本），上限单文件 1MB、每文件 50 份。
+const SNAP_MAX_BYTES = 1024 * 1024
+const SNAP_KEEP = 50
+const SNAP_EXTS = new Set(['md', 'markdown', 'txt'])
+
+/** 只接受 wiki/ 下的相对路径；其余（含越界尝试）返回 null。 */
+function safeWikiRel(rel) {
+  const r = String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '')
+  if (!r.startsWith(WIKI_DIR + '/') || r.split('/').includes('..') || r.includes('\0')) return null
+  return r
+}
+
+function snapTs() {
+  return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '-') + crypto.randomBytes(2).toString('hex')
+}
+
+function snapDirFor(histKbDir, rel) {
+  return path.join(histKbDir, ...String(rel).split('/'))
+}
+
+/** 快照一个知识库的 wiki/ 树：内容有变化的文件各写入一个新版本，并淘汰超量旧版本。 */
+function snapWikiTree(rootAbs, histKbDir) {
+  const files = []
+  walkFiles(path.join(rootAbs, WIKI_DIR), files, 2000)
+  let snapped = 0
+  for (const abs of files) {
+    const rel = path.relative(rootAbs, abs).split(path.sep).join('/')
+    const ext = path.extname(abs).slice(1).toLowerCase()
+    if (!SNAP_EXTS.has(ext)) continue
+    let text
+    try {
+      if (fs.statSync(abs).size > SNAP_MAX_BYTES) continue
+      text = fs.readFileSync(abs, 'utf8')
+    } catch { continue }
+    const dir = snapDirFor(histKbDir, rel)
+    try {
+      const vers = fs.readdirSync(dir).sort()
+      if (vers.length && fs.readFileSync(path.join(dir, vers[vers.length - 1]), 'utf8') === text) continue
+    } catch { /* 首次快照 */ }
+    try {
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, snapTs() + '.' + ext), text, 'utf8')
+      snapped++
+      const vers = fs.readdirSync(dir).sort()
+      if (vers.length > SNAP_KEEP) for (const f of vers.slice(0, vers.length - SNAP_KEEP)) fs.rmSync(path.join(dir, f), { force: true })
+    } catch { /* 单文件失败忽略 */ }
+  }
+  return { snapped }
+}
+
+/** 某个 wiki 文件的版本列表（新→旧）。 */
+function listSnapshots(histKbDir, rel) {
+  const r = safeWikiRel(rel)
+  if (!r) throw new KbError(400, '仅支持 wiki/ 下文件的历史')
+  let vers = []
+  try {
+    vers = fs.readdirSync(snapDirFor(histKbDir, r)).filter((f) => /^\d{8}T\d{6}-[0-9a-f]+\./.test(f)).sort()
+  } catch { /* 无历史 */ }
+  return vers.reverse().map((f) => {
+    let size = 0
+    try { size = fs.statSync(path.join(snapDirFor(histKbDir, r), f)).size } catch {}
+    return { ts: f, size }
+  })
+}
+
+/** 读某个版本的文本内容。 */
+function readSnapshot(histKbDir, rel, ts) {
+  const r = safeWikiRel(rel)
+  if (!r) throw new KbError(400, '仅支持 wiki/ 下文件的历史')
+  if (!/^\d{8}T\d{6}-[0-9a-f]+(\.(md|markdown|txt))?$/.test(String(ts || ''))) throw new KbError(400, '非法版本号')
+  const dir = snapDirFor(histKbDir, r)
+  let name = String(ts)
+  if (!/\.(md|markdown|txt)$/.test(name)) {
+    const cand = fs.readdirSync(dir).filter((f) => f.startsWith(name))
+    if (!cand.length) throw new KbError(404, '版本不存在')
+    name = cand[0]
+  }
+  try {
+    return fs.readFileSync(path.join(dir, name), 'utf8')
+  } catch {
+    throw new KbError(404, '版本不存在')
+  }
+}
+
+/** 恢复版本：把快照内容写回当前 wiki 文件（受控写路径，仅 wiki/）。 */
+function restoreSnapshot(root, histKbDir, rel, ts) {
+  const r = safeWikiRel(rel)
+  if (!r) throw new KbError(400, '仅支持恢复 wiki/ 下文件')
+  const text = readSnapshot(histKbDir, rel, ts)
+  const abs = resolveCreatable(root, r)
+  fs.writeFileSync(abs, text, 'utf8')
+  return { rel: r, size: Buffer.byteLength(text) }
+}
+
+// ── 页面反馈（追加进本库 wiki/meta/feedback.md，agent 处理后标 [done]） ──
+function appendFeedback(root, rel, note) {
+  const r = String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '')
+  if (!r || r.split('/').includes('..') || r.includes('\0')) throw new KbError(400, '非法页面路径')
+  const clean = String(note || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 500)
+  if (!clean) throw new KbError(400, '反馈内容不能为空')
+  const metaDir = resolveCreatable(root, path.join(WIKI_DIR, 'meta'))
+  fs.mkdirSync(metaDir, { recursive: true })
+  const file = path.join(metaDir, 'feedback.md')
+  let text = ''
+  try { text = fs.readFileSync(file, 'utf8') } catch (e) { if (!(e && e.code === 'ENOENT')) throw e }
+  if (!text) text = '# 页面反馈\n\n<!-- 阅读页「⚠️ 反馈」写入；agent 处理完把 [open] 改 [done] -->\n'
+  const line = `- ${today()} ${new Date().toTimeString().slice(0, 5)} [open] ${r} — ${clean}`
+  fs.writeFileSync(file, text.replace(/\n*$/, '\n') + line + '\n', 'utf8')
+  return { feedback: path.relative(ensureRoot(root), file).split(path.sep).join('/'), line }
+}
+
 // ── 多知识库注册表 ───────────────────────────────────────────
 const REGISTRY_VERSION = 1
 
@@ -545,6 +658,8 @@ module.exports = {
   ensureRoot, resolveExisting, resolveCreatable, lexicalAbs, cleanSegment,
   listDir, parseFrontmatter, readDoc, sendFile, search, uploadRaw,
   readSchema, writeSchema,
+  safeWikiRel, snapWikiTree, listSnapshots, readSnapshot, restoreSnapshot, appendFeedback,
+  SNAP_MAX_BYTES, SNAP_KEEP,
   statusPayload, bootstrap, defaultRoot,
   BOOT_INDEX, BOOT_LOG, BOOT_SCHEMA,
 }

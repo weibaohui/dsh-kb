@@ -63,3 +63,7 @@ description: 团队知识库（dsh-kb）的查询与沉淀。干活前先查知�
 ## 月度 lint（由 dsh-tasks 定时触发时执行）
 
 检查并输出清单：`[[...]]` 死链、index 不可达的孤儿页、`updated` 超 90 天的条目；结果写入 `wiki/postmortems/` 平级的新页 `wiki/meta/lint-YYYY-MM.md` 并记 log，等人工处理。
+
+## 页面反馈（v0.7+ 插件内置）
+
+用户在阅读页点「⚠️ 反馈」会把问题追加进本库 `wiki/meta/feedback.md`，每行格式：`- 日期 时间 [open] <页面路径> — <问题>`。被要求处理反馈时：读该文件 → 逐条核查对应页面 → 按 schema 修正 → 把该行 `[open]` 改为 `[done]`。wiki/ 下页面被修改时插件会自动快照版本，大胆纠错（可从「🕐 历史」恢复）。

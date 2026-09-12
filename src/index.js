@@ -8,8 +8,9 @@
  *  - 同源路由 /dsh-kb/api/*：status / tree / doc / file / search / upload / queue*，
  *    全部以知识库根为界（kb-core 双重边界拒绝越界与软链逃逸）；
  *  - 无独立端口、无 token/限流——只服务本机 dsh Web GUI（登录门禁由宿主用户体系负责）；
- *  - 写路径三条：upload 到 raw/（人）+ 自动蒸馏的 wiki 成文（kb-bot agent 会话）
- *    + 库约定 schema.md 的人工编辑（GET/PUT /schema，白名单只此一个文件）。
+ *  - 写路径四条：upload 到 raw/（人）+ 自动蒸馏的 wiki 成文（kb-bot agent 会话）
+ *    + 库约定 schema.md 的人工编辑（GET/PUT /schema，白名单只此一个文件）
+ *    + wiki 版本恢复（POST /history/restore，内容来自快照）与页面反馈（/feedback 追加）。
  *
  * 自动蒸馏（v0.2，设计文档 dsh-kb-auto-distill-design.md）：
  *  - 入料检测：upload 钩子 + raw/ fs.watch（200ms 防抖）+ 周期兜底扫描；
@@ -311,6 +312,9 @@ module.exports = {
 
     // raw/ 监视（200ms 防抖）：主库 + 每个素材库各一个；watcher 不可靠的文件系统由 sweep 覆盖
     const kbWatchers = new Map() // kbId → fs.Watcher
+    const historyRoot = join(dshHome(), 'dsh-kb', 'history')
+    const histDirOf = (kbId) => join(historyRoot, kbId || 'main')
+    const snapKbWiki = (kb) => { try { core.snapWikiTree(kb.root, histDirOf(kb.id)) } catch { /* 下一轮再试 */ } }
     const watchKb = (kb) => {
       if (kbWatchers.has(kb.id) || kb.kind !== 'material' || kb.distillEnabled === false) return
       try {
@@ -319,14 +323,24 @@ module.exports = {
         const rescan = debounce(() => { try { queue.scan(kb.id) } catch { /* sweep 兜底 */ } }, 200)
         kbWatchers.set(kb.id, fs.watch(rawDir, { recursive: true }, rescan))
       } catch (e) { logger.warn(`dsh-kb: ${kb.name} raw/ 监视不可用（兜底扫描覆盖）：${(e && e.message) || e}`) }
+      // wiki/ 监视 → 版本历史快照（所有素材库，含蒸馏关闭的：人/agent 的编辑都要留版本）
+      try {
+        const wikiDir = join(kb.root, core.WIKI_DIR)
+        fs.mkdirSync(wikiDir, { recursive: true })
+        const snap = debounce(() => snapKbWiki(kb), 800)
+        kbWatchers.set(kb.id + ':wiki', fs.watch(wikiDir, { recursive: true }, snap))
+      } catch (e) { logger.warn(`dsh-kb: ${kb.name} wiki/ 监视不可用（无版本历史）：${(e && e.message) || e}`) }
     }
     const unwatchKb = (kbId) => {
-      const w = kbWatchers.get(kbId)
-      if (w) { try { w.close() } catch {} kbWatchers.delete(kbId) }
+      for (const key of [kbId, kbId + ':wiki']) {
+        const w = kbWatchers.get(key)
+        if (w) { try { w.close() } catch {} kbWatchers.delete(key) }
+      }
     }
     watchKb(MAIN_KB)
     for (const k of addedKbs) watchKb(k)
-    ctx.effect(() => () => { for (const w of kbWatchers.values()) { try { w.close() } catch {} } }, 'dsh-kb: raw watchers')
+    for (const k of allKbs()) if (k.kind === 'material') snapKbWiki(k) // 启动先补一次快照
+    ctx.effect(() => () => { for (const w of kbWatchers.values()) { try { w.close() } catch {} } }, 'dsh-kb: raw/wiki watchers')
 
     let sweepTimer = null
     const sweep = () => {
@@ -392,6 +406,31 @@ module.exports = {
                 const body = JSON.parse((await readBody(req, 512 * 1024)) || '{}')
                 const r = core.writeSchema(kb.root, body.text)
                 sendJson(res, 200, { ok: true, kb: kb.id, ...r })
+                return
+              }
+              // ── 版本历史（wiki/ 快照，读任意库；恢复仅素材库） ──
+              if (req.method === 'GET' && rest === '/history') {
+                sendJson(res, 200, { ok: true, items: core.listSnapshots(histDirOf(kb.id), q.get('path') || '') })
+                return
+              }
+              if (req.method === 'GET' && rest === '/history/file') {
+                sendJson(res, 200, { ok: true, text: core.readSnapshot(histDirOf(kb.id), q.get('path') || '', q.get('ts') || '') })
+                return
+              }
+              if (req.method === 'POST' && rest === '/history/restore') {
+                if (kb.kind !== 'material') { sendJson(res, 403, { ok: false, error: '产出库只读，不支持恢复' }); return }
+                const body = JSON.parse((await readBody(req)) || '{}')
+                const r = core.restoreSnapshot(kb.root, histDirOf(kb.id), body.path, body.ts)
+                logger.info(`dsh-kb: [${kb.id}] 版本恢复 ${r.rel}（${r.size}B）`)
+                sendJson(res, 200, { ok: true, ...r })
+                return
+              }
+              // ── 页面反馈（追加进本库 wiki/meta/feedback.md） ──
+              if (req.method === 'POST' && rest === '/feedback') {
+                if (kb.kind !== 'material') { sendJson(res, 403, { ok: false, error: '产出库只读，不支持反馈' }); return }
+                const body = JSON.parse((await readBody(req)) || '{}')
+                const r = core.appendFeedback(kb.root, body.path, body.note)
+                sendJson(res, 200, { ok: true, ...r })
                 return
               }
               if (req.method === 'POST' && rest === '/upload') {
