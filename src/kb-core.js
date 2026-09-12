@@ -487,8 +487,10 @@ function safeWikiRel(rel) {
   return r
 }
 
+let snapSeq = 0
 function snapTs() {
-  return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '-') + crypto.randomBytes(2).toString('hex')
+  // 秒级时间戳 + 进程内单调序号:同一秒内多次快照也能保证字典序=时间序
+  return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '-') + String(++snapSeq % 100000).padStart(5, '0') + crypto.randomBytes(2).toString('hex')
 }
 
 function snapDirFor(histKbDir, rel) {
