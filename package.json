@@ -23,6 +23,10 @@
     "cordis.patch.yml",
     "README.md"
   ],
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.1.2-rc.1"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -47,8 +51,5 @@
     "offline",
     "full-text-search"
   ],
-  "dependencies": {},
-  "engines": {
-    "node": ">=20"
-  }
+  "dependencies": {}
 }
