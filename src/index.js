@@ -174,7 +174,13 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
     let finalText = ''
     const seen = new Set()
     const eventList = () => {
-      try { return Array.isArray(agent.session.events) ? agent.session.events : [] } catch { return [] }
+      // 0.1.5 起移除 events 属性（snapshotEvents() 取代），旧宿主仍是数组属性；异常兜底空数组
+      try {
+        const ses = agent.session
+        if (!ses) return []
+        if (typeof ses.snapshotEvents === 'function') return ses.snapshotEvents() || []
+        return Array.isArray(ses.events) ? ses.events : []
+      } catch { return [] }
     }
     // 事件泵：text-delta 增量（block-assembler 形状）；'text' 整块为旧形状兜底；
     // assistant/message 记录最终可见全文（JSON 尾协议从这里取，防流式输出被截断）。
