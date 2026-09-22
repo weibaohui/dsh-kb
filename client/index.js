@@ -21,6 +21,12 @@ const API = '/dsh-kb/api'
 
 /** 客户端会话服务（apply 时 ctx.inject(['sessions']) 懒注入；缺席时「打开会话」降级提示）。 */
 let sessionsSvc = null
+/** 客户端 uiWorkspace 服务（侧栏「新会话」按钮背后的导航服务；缺席时「问 AI」退回写当前输入框）。 */
+let uiWorkspaceSvc = null
+/** composer 挂载槽（含 per-session 草稿通道；「+ 知识库」与「问 AI」共用）。 */
+let composerScope = null
+/** kb composer 槽随宿主视图渲染出的当前会话 id——「问 AI」用来确认视图已切到目标会话。 */
+let kbLiveSessionId
 let activeKbId = 'main' // 当前浏览的知识库（图片/下载链接按它取文件）
 let kbsCache = null
 async function fetchKbs(force) {
@@ -991,10 +997,65 @@ function insertTextViaDom(text) {
   } catch { return false }
 }
 
+/** 轮询条件直到成立或超时；成立时返回真值，超时返回 null。 */
+function waitCond(fn, timeout, step) {
+  return new Promise((resolve) => {
+    const t0 = Date.now()
+    const tick = () => {
+      let v = null
+      try { v = fn() } catch {}
+      if (v) return resolve(v)
+      if (Date.now() - t0 >= timeout) return resolve(null)
+      setTimeout(tick, step || 60)
+    }
+    tick()
+  })
+}
+
+/** 会话列表快照（sessions 服务的 list store；缺席返回 null）。 */
+function sessionSnap() {
+  try { return (sessionsSvc && sessionsSvc.list && sessionsSvc.list.getSnapshot()) || null } catch { return null }
+}
+
+/** 把 prompt 落到「新建任务」页的输入框：走侧栏「新会话」同一条宿主导航（uiWorkspace.startSession，
+ *  复用当前 workspace 的空白会话、否则新建），等视图切到位后直写 composer。
+ *  uiWorkspace/会话服务缺席时退回旧行为（写当前视图的输入框）。返回 true=已写入。 */
+async function newTaskInsert(prompt) {
+  const snap = sessionSnap()
+  const canNew = !!(uiWorkspaceSvc && typeof uiWorkspaceSvc.startSession === 'function' && snap)
+  if (!canNew) return insertTextViaDom(prompt) === true
+  const before = snap.current
+  const beforeBlank = before != null && !!(snap.byId && snap.byId[before] && snap.byId[before].blank)
+  if (!beforeBlank) {
+    // 目标会话页不在「新任务」态：触发宿主导航（不等待返回值——它同步发起异步打开）
+    try { uiWorkspaceSvc.startSession() } catch { return insertTextViaDom(prompt) === true }
+    // 等 current 离开旧会话（新建/切到别的空白会话/清空回欢迎页）
+    const switched = await waitCond(() => { const s = sessionSnap(); return s && s.current !== before ? s.current : null }, 2500)
+    if (switched === null && before != null) {
+      // 2.5s 仍停在原会话：导航没发生（如 startSession 复用失败），退回写当前视图，别把文本弄丢
+      const again = sessionSnap()
+      if (!(again && again.current === before && again.byId && again.byId[before] && again.byId[before].blank)) {
+        return insertTextViaDom(prompt) === true
+      }
+    }
+  }
+  // 等视图真的切到目标：kb composer 槽渲染出的 sessionId 与 current 一致 + 输入卡在 DOM
+  const ready = await waitCond(() => {
+    const s = sessionSnap()
+    return s && document.querySelector('[data-composer-card]') && kbLiveSessionId === s.current ? true : null
+  }, 2000)
+  if (!ready) {
+    // 槽信号缺席（极端环境）：快照已切换的情况下再垫 350ms 等旧视图卸载，然后直写
+    await new Promise((r) => setTimeout(r, 350))
+  }
+  return insertTextViaDom(prompt) === true
+}
+
 /** composer 工具行按钮（conversation.input.left slot）。 */
 function KbComposerButtonSlot(props) {
   const h = React.createElement
   React.useEffect(ensureKbComposerStyles, [])
+  React.useEffect(() => { kbLiveSessionId = props.sessionId }, [props.sessionId]) // 提交后记录——「问 AI」以它确认视图已切到目标会话
   const [picker, setPicker] = React.useState(null)
   const [kbs, setKbs] = React.useState([])
   const [msg, setMsg] = React.useState(null)
@@ -1316,7 +1377,7 @@ function KbPage() {
     setNav({ kind: 'search', q })
   }
 
-  // 「🤖 问 AI」：先检索当前库,把命中页 @ 引用 + 问题一起写入输入框,agent 带着依据作答
+  // 「🤖 问 AI」：先检索当前库,把命中页 @ 引用 + 问题落到「新建任务」页输入框,agent 带着依据作答
   const askAi = async () => {
     const q = query.trim()
     if (!q) { showHint('先在搜索框输入问题,再点「问 AI」'); return }
@@ -1330,10 +1391,10 @@ function KbPage() {
       + (tops ? `\n初步检索命中：${tops}。` : '\n初步检索无命中,请用工具在知识库根目录继续检索。')
       + '\n要求：先检索核对再下结论；回答末尾列出依据（来源页面路径）；与库内条目矛盾的说法要明确指出。'
     setOpen(false)
-    const r = insertTextViaDom(prompt)
+    const r = await newTaskInsert(prompt)
     if (r !== true) {
       try { await navigator.clipboard.writeText(prompt); showHint('无法自动插入,问题已复制到剪贴板,请在输入框粘贴') } catch { showHint('插入失败,请手动把问题粘贴到输入框') }
-    } else showHint('问题已写入输入框,发送即让 agent 带检索回答 🤖')
+    } else showHint('已在新任务页填入问题,发送即让 agent 带检索回答 🤖')
   }
 
   // 页面反馈:记录进本库 wiki/meta/feedback.md;勾选自动处理时由后台会话执行,执行器缺席降级为写入输入框
@@ -1568,6 +1629,10 @@ module.exports = {
     try {
       if (typeof ctx.inject === 'function') ctx.inject(['sessions'], (scope) => { sessionsSvc = scope && scope.sessions })
     } catch (e) { console.error('[dsh-kb] sessions inject:', e) }
+    // uiWorkspace：侧栏「新会话」按钮背后的导航服务，「问 AI」用它落到新建任务页（缺席降级）
+    try {
+      if (typeof ctx.inject === 'function') ctx.inject(['uiWorkspace'], (scope) => { uiWorkspaceSvc = scope && (scope.uiWorkspace || scope) })
+    } catch (e) { console.error('[dsh-kb] uiWorkspace inject:', e) }
 
     // 侧栏导航入口（工艺库下方，dsh-process 同款 DOM 注入）+ 隐藏挂载 overlay
     try {
@@ -1597,7 +1662,7 @@ module.exports = {
 
     // 对话框「+ 知识库」按钮（composer 工具行）：动态 inject（静态列服务会拖住插件激活）
     try {
-      let composerScope = null
+      composerScope = null
       if (typeof ctx.inject === 'function') {
         ctx.inject(['inputTriggers', 'sessions'], (scope) => { composerScope = scope })
       }
