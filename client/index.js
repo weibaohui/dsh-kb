@@ -19,6 +19,439 @@
 
 const API = '/dsh-kb/api'
 
+const NS = 'dshKb'
+
+const ZH = {
+  // 通用
+  loading: '加载中…',
+  searching: '搜索中…',
+  cancel: '取消',
+  submit: '提交',
+  save: '保存',
+  saving: '保存中…',
+  confirm: '确定',
+  refresh: '刷新',
+  close: '✕ 关闭',
+  openSession: '打开会话',
+  retry: '重试',
+  loadingQueue: '读取队列…',
+  readFail: '读取失败：',
+  searchFail: '搜索失败：',
+  // composer 工具行按钮 + 目录选择浮层
+  composerBtnLabel: '📚 知识库',
+  composerBtnTitle: '基于知识库目录推理',
+  pickerTitle: '选择知识库目录或文件（@ 引用）',
+  pickerLoadFail: '加载失败：',
+  insertedRef: '✓ 已插入引用',
+  insertFailCopied: '无法自动插入，已复制到剪贴板',
+  expandAria: '展开',
+  // 侧栏入口
+  sidebarLabel: '知识库',
+  sidebarTitle: '知识库 — 浏览 / 搜索 / 蒸馏队列',
+  sidebarTrigger: '知识库',
+  // 全页 overlay 顶栏
+  overlayTitle: '📚 知识库',
+  searchPlaceholder: '全文搜索（Enter）…',
+  askAiBtn: '🤖 问 AI',
+  askAiTitle: '带着检索命中问 AI（写入输入框,agent 作答并附来源）',
+  uploadBtn: '⬆ 上传素材',
+  uploadTitle: '上传素材（自动蒸馏入队）',
+  queueBtn: '⚗️ 蒸馏队列',
+  queueBtnTitle: '蒸馏队列（全局，跨库串行加工）',
+  // 侧栏（overlay 内）
+  switchKb: '切换知识库',
+  switchKbAria: '切换知识库',
+  kbLoading: '加载中…',
+  newKbTitle: '新建知识库（素材库可自动蒸馏；产出库只读）',
+  delKbTitle: '移除当前知识库「{name}」（不删数据）',
+  quickIndex: '目录',
+  quickLog: '操作流水',
+  quickSchema: 'KB 约定',
+  treeWiki: 'wiki · 成文知识',
+  treeRaw: 'raw · 素材（不可变）',
+  uploadRawTitle: '上传素材到 raw/（自动蒸馏）',
+  uploadRawBtn: '⬆ 上传',
+  atAgent: '@ 给 agent',
+  // 文档阅读视图
+  docAtAgent: '@ 给 agent',
+  editSchemaTitle: '编辑本库的加工约定（每库独立）',
+  editSchemaBtn: '✏️ 编辑约定',
+  historyBtn: '🕐 历史',
+  historyTitle: '查看本页的修改历史,可恢复旧版本',
+  feedbackBtn: '⚠️ 反馈',
+  feedbackTitle: '页面内容有误或缺漏?记入反馈,后台 agent 自动核实修正',
+  downloadBtn: '⬇ 下载',
+  downloadBinary: '下载',
+  downloadTitle: '下载/导出本页',
+  uploadMaterial: '上传素材',
+  uploadToTitle: '上传到 {dir}',
+  staleChip: '⏳ {n} 天未更新',
+  staleTitle: '内容可能过时,建议核对或交 agent 复查',
+  updatedChip: '更新 {v}',
+  wikilinkTitle: '搜索「{t}」',
+  binaryHint: '二进制/超大文件不支持在线阅读，可下载或 @ 给 agent 处理。',
+  // 反馈对话框
+  feedbackAria: '页面反馈',
+  feedbackHeader: '⚠️ 反馈：{title}',
+  feedbackPlaceholder: '哪里有误/缺了什么/该补充什么…',
+  feedbackAuto: '提交后自动交给 agent 后台处理（修完自动标 [done]，进度见蒸馏队列面板）',
+  // schema 编辑器
+  schemaPath: 'schema.md · 「{name}」的加工约定',
+  schemaMainLib: '主库',
+  schemaResetBtn: '恢复默认模板',
+  schemaResetTitle: '把编辑框内容换成默认模板（仍需点保存才写入）',
+  schemaDirtyConfirm: '有未保存的修改，放弃并返回？',
+  schemaSavedHint: '约定已保存 · 自动蒸馏与 agent 的下次加工即按新约定执行 ✅',
+  schemaSaveFail: '保存失败：',
+  schemaResetFail: '获取默认模板失败：',
+  schemaHint: '：kb-bot 自动蒸馏与交互 agent 加工前都会先读它（最终权威），改完保存即生效，无需重启。各库约定互不影响，可按库定制页面规范、目录用途与加工流程。',
+  schemaHintBold: '这份约定只作用于当前知识库',
+  schemaNotExist: ' schema.md 当前不存在（曾被删除），保存后将按编辑框内容创建。',
+  // 历史视图
+  historyPath: '🕐 {rel} 的版本历史（{n}）',
+  historyBack: '← 返回页面',
+  historyEmpty: '还没有历史版本。页面被修改后,宿主会自动快照(内容有变化才记一个版本)。',
+  historyVer: '版本 {ts}',
+  historyRestoreBtn: '恢复此版本',
+  historyBackList: '返回列表',
+  historyViewBtn: '查看',
+  historyRestoreBtn2: '恢复',
+  historyReadFail: '读取版本失败：',
+  historyRestoreConfirm: '把「{rel}」恢复到 {ts} 的版本?当前内容将被覆盖(可再从历史恢复回来)。',
+  historyRestoredHint: '已恢复该版本 ✅',
+  historyRestoreFail: '恢复失败：',
+  // 搜索结果视图
+  searchNoHit: '没有匹配「{q}」的内容',
+  searchSummary: '{hits} 个文件命中「{q}」· {scanned} 个文件已扫描 · {ms}ms',
+  // 蒸馏队列
+  qQueued: '排队',
+  qRunning: '蒸馏中',
+  qDone: '完成',
+  qFailed: '失败',
+  qSkipped: '跳过',
+  fbQueued: '排队',
+  fbRunning: '处理中',
+  fbDone: '完成',
+  fbFailed: '失败',
+  fbHeader: '⚠️ 反馈处理（后台自动，完成自动标 [done]）',
+  qDistillOff: '自动蒸馏已停用（设置）',
+  qPaused: '已暂停',
+  qResume: '▶ 恢复',
+  qPause: '⏸ 暂停',
+  qScanRaw: '扫描 raw/',
+  qDistillLibs: '素材库自动蒸馏：',
+  qDistillOnTitle: '该库自动蒸馏已开，点击关闭',
+  qDistillOffTitle: '该库自动蒸馏已关，点击开启',
+  qDistillOn: '开',
+  qDistillOff: '关',
+  qExecutorDown: '⚠️ 执行器不可用：{err}（排队条目会保留，配置好模型后自动继续）',
+  qExecutorDownFallback: '稍后自动重试',
+  qRoute: '⚙️ 蒸馏模型：{provider}/{model}',
+  qRouteDefault: '（跟随宿主默认，设置 → 知识库 可指定）',
+  qRouteOverride: '（设置中指定）',
+  qDisabledBanner: '自动蒸馏已在设置中停用：素材仍会入队留档，但不会执行；可手动 @ 给 agent 加工。',
+  qEmpty: '队列为空：往 raw/ 上传素材后会自动入队蒸馏。',
+  qViewOutput: '看产出',
+  qChunk: '（片 {idx}/{total}）',
+  qAttempt: '（第 {n} 次）',
+  // 新建知识库对话框
+  newKbAria: '新建知识库',
+  newKbHeader: '📚 新建知识库',
+  newKbNamePh: '名称（默认取目录名）',
+  newKbRootPh: '文件夹绝对路径（不存在将自动创建）',
+  newKbKind: '素材库（建骨架并可自动蒸馏；产出库只读）',
+  newKbAdding: '添加中…',
+  newKbNote: '注意：添加后该目录将可经局域网 API 浏览/上传。',
+  // toast / 提示
+  toastKbRootUnavailable: '知识库根不可用',
+  toastInserted: '已把 @{rel} 插入输入框',
+  toastInsertCopied: '无法自动插入，已复制到剪贴板，请在输入框粘贴',
+  toastAskAiHint: '先在搜索框输入问题,再点「问 AI」',
+  toastAskAiInserted: '已在新任务页填入问题,发送即让 agent 带检索回答 🤖',
+  toastAskAiCopied: '无法自动插入,问题已复制到剪贴板,请在输入框粘贴',
+  toastAskAiFail: '插入失败,请手动把问题粘贴到输入框',
+  toastFeedbackSaved: '反馈已记入 wiki/meta/feedback.md ✅（可稍后 @ 给 agent 处理）',
+  toastFeedbackAuto: '已交给 agent 后台处理 🤖 修完自动标 [done]（进度见蒸馏队列面板）',
+  toastFeedbackExecutorDownInserted: '执行器不可用,处理指令已写入输入框,发送即执行 ⚠️',
+  toastFeedbackExecutorDownCopied: '执行器不可用,指令已复制到剪贴板,请粘贴发送',
+  toastFeedbackFail: '反馈失败：',
+  toastUploadReadOnly: '产出库只读，不支持上传',
+  toastUploadFail: '上传 {name} 失败：',
+  toastUploaded: '已上传 {n} 个素材到 {dir}/ · 自动蒸馏已入队 ⚗️',
+  toastDelConfirm: '移除知识库「{name}」？磁盘数据不受影响。',
+  toastDelDone: '已移除「{name}」',
+  toastDelFail: '移除失败：',
+  toastOpFail: '操作失败：',
+  toastAddDone: '已添加「{name}」并选中',
+  toastAddFail: '添加失败：',
+  toastQueuePaused: '队列已暂停（跑完当前为止）',
+  toastQueueResumed: '队列已恢复',
+  toastQueueOpDone: '已执行',
+  toastQueueOpFail: '操作失败：',
+  toastSessionUnavailable: '客户端会话服务不可用，无法跳转',
+  toastSessionOpened: '已打开 bot 会话',
+  toastToggleDistillFail: '操作失败：',
+  // 问 AI / 反馈降级 prompt（交给 agent 的指令文本，保持中文以匹配 schema 约定）
+  promptAskAi: '请回答：{q}\n依据来自知识库（{root}）。',
+  promptAskAiHits: '\n初步检索命中：{tops}。',
+  promptAskAiNoHit: '\n初步检索无命中,请用工具在知识库根目录继续检索。',
+  promptAskAiTail: '\n要求：先检索核对再下结论；回答末尾列出依据（来源页面路径）；与库内条目矛盾的说法要明确指出。',
+  promptAskAiRootFallback: '见 @ 路径',
+  promptFeedback: '@{root}/{rel} 请核查这条反馈:「{note}」。按当前库 schema 修正页面后,把 wiki/meta/feedback.md 里对应行的 [open] 改为 [done]。',
+  // 设置页
+  settingsLabel: '知识库',
+  settingsHint: '上传到知识库 raw/ 的素材自动入队，由 bot 会话按 schema 蒸馏成文；进度见知识库页「蒸馏队列」。',
+  settingsLoadFail: '加载失败',
+  settingsEnable: '启用自动蒸馏',
+  settingsProvider: 'Provider',
+  settingsModel: 'Model',
+  settingsTimeout: '单条目超时（分钟）',
+  settingsMaxAttempts: '失败重试上限',
+  settingsSweep: '兜底扫描周期（秒）',
+  settingsFollowDefault: '跟随宿主默认',
+  settingsProviderPh: '如 deepseek-official',
+  settingsModelPh: '跟随宿主默认',
+  settingsPickModel: '选择模型（必填）',
+  settingsPickModelAny: '选择模型',
+  settingsCurrentRoute: '当前生效：{provider}/{model}（{src}）',
+  settingsRouteOverride: '设置指定',
+  settingsRouteDefault: '宿主默认',
+  settingsSaved: '✓ 已保存',
+  settingsSaveFail: '保存失败：',
+  // 拖拽提示
+  dropHint: '⬇ 松开，上传素材到知识库（自动蒸馏入队）',
+  recentTitle: '最近更新',
+  recentSub: 'log.md 尾部，点路径直达',
+}
+
+const EN = {
+  loading: 'Loading…',
+  searching: 'Searching…',
+  cancel: 'Cancel',
+  submit: 'Submit',
+  save: 'Save',
+  saving: 'Saving…',
+  confirm: 'OK',
+  refresh: 'Refresh',
+  close: '✕ Close',
+  openSession: 'Open chat',
+  retry: 'Retry',
+  loadingQueue: 'Reading queue…',
+  readFail: 'Load failed: ',
+  searchFail: 'Search failed: ',
+  composerBtnLabel: '📚 Knowledge',
+  composerBtnTitle: 'Reason from a knowledge-base folder',
+  pickerTitle: 'Pick a knowledge-base folder or file (@ reference)',
+  pickerLoadFail: 'Load failed: ',
+  insertedRef: '✓ Reference inserted',
+  insertFailCopied: 'Could not insert automatically — copied to clipboard',
+  expandAria: 'Expand',
+  sidebarLabel: 'Knowledge',
+  sidebarTitle: 'Knowledge — browse / search / distill queue',
+  sidebarTrigger: 'Knowledge',
+  overlayTitle: '📚 Knowledge',
+  searchPlaceholder: 'Full-text search (Enter)…',
+  askAiBtn: '🤖 Ask AI',
+  askAiTitle: 'Ask AI with search hits (written into the composer; the agent answers with sources)',
+  uploadBtn: '⬆ Upload',
+  uploadTitle: 'Upload material (auto-distill enqueued)',
+  queueBtn: '⚗️ Distill',
+  queueBtnTitle: 'Distill queue (global, serial across libraries)',
+  switchKb: 'Switch knowledge base',
+  switchKbAria: 'Switch knowledge base',
+  kbLoading: 'Loading…',
+  newKbTitle: 'New knowledge base (material libs auto-distill; produced libs are read-only)',
+  delKbTitle: 'Remove current knowledge base "{name}" (data on disk is kept)',
+  quickIndex: 'Index',
+  quickLog: 'Activity log',
+  quickSchema: 'KB rules',
+  treeWiki: 'wiki · written knowledge',
+  treeRaw: 'raw · sources (immutable)',
+  uploadRawTitle: 'Upload material to raw/ (auto-distill)',
+  uploadRawBtn: '⬆ Upload',
+  atAgent: '@ to agent',
+  docAtAgent: '@ to agent',
+  editSchemaTitle: 'Edit this library\'s processing rules (per library)',
+  editSchemaBtn: '✏️ Edit rules',
+  historyBtn: '🕐 History',
+  historyTitle: 'View this page\'s revision history; restore older versions',
+  feedbackBtn: '⚠️ Feedback',
+  feedbackTitle: 'Page wrong or missing something? Log it; a background agent verifies and fixes',
+  downloadBtn: '⬇ Download',
+  downloadBinary: 'Download',
+  downloadTitle: 'Download / export this page',
+  uploadMaterial: 'Upload',
+  uploadToTitle: 'Upload to {dir}',
+  staleChip: '⏳ {n} days stale',
+  staleTitle: 'Content may be outdated — verify or ask an agent to review',
+  updatedChip: 'updated {v}',
+  wikilinkTitle: 'Search "{t}"',
+  binaryHint: 'Binary / oversized files can\'t be read inline — download or @ an agent to handle them.',
+  feedbackAria: 'Page feedback',
+  feedbackHeader: '⚠️ Feedback: {title}',
+  feedbackPlaceholder: 'What\'s wrong / missing / should be added…',
+  feedbackAuto: 'After submitting, hand it to a background agent (marks [done] when fixed; progress in the distill queue panel)',
+  schemaPath: 'schema.md · processing rules for "{name}"',
+  schemaMainLib: 'Main library',
+  schemaResetBtn: 'Reset to default template',
+  schemaResetTitle: 'Replace the editor with the default template (save to write it)',
+  schemaDirtyConfirm: 'Discard unsaved changes and go back?',
+  schemaSavedHint: 'Rules saved · auto-distill and the agent\'s next run will use them ✅',
+  schemaSaveFail: 'Save failed: ',
+  schemaResetFail: 'Failed to load default template: ',
+  schemaHint: ': kb-bot auto-distill and interactive agents read it first (final authority); saving takes effect immediately, no restart. Rules are per library and independent — tailor page conventions, folder roles, and the processing flow per library.',
+  schemaHintBold: 'These rules only apply to the current knowledge base',
+  schemaNotExist: ' schema.md does not exist yet (was deleted); saving creates it from the editor.',
+  historyPath: '🕐 Revision history of {rel} ({n})',
+  historyBack: '← Back to page',
+  historyEmpty: 'No revisions yet. After a page is edited, the host snapshots it automatically (only when content changes).',
+  historyVer: 'Version {ts}',
+  historyRestoreBtn: 'Restore this version',
+  historyBackList: 'Back to list',
+  historyViewBtn: 'View',
+  historyRestoreBtn2: 'Restore',
+  historyReadFail: 'Failed to load version: ',
+  historyRestoreConfirm: 'Restore "{rel}" to the {ts} version? The current content will be overwritten (you can restore it back from history).',
+  historyRestoredHint: 'Version restored ✅',
+  historyRestoreFail: 'Restore failed: ',
+  searchNoHit: 'No matches for "{q}"',
+  searchSummary: '{hits} file(s) match "{q}" · {scanned} scanned · {ms}ms',
+  qQueued: 'Queued',
+  qRunning: 'Distilling',
+  qDone: 'Done',
+  qFailed: 'Failed',
+  qSkipped: 'Skipped',
+  fbQueued: 'Queued',
+  fbRunning: 'Processing',
+  fbDone: 'Done',
+  fbFailed: 'Failed',
+  fbHeader: '⚠️ Feedback processing (background, auto-marks [done] when finished)',
+  qDistillOff: 'Auto-distill disabled (settings)',
+  qPaused: 'Paused',
+  qResume: '▶ Resume',
+  qPause: '⏸ Pause',
+  qScanRaw: 'Scan raw/',
+  qDistillLibs: 'Material libraries auto-distill:',
+  qDistillOnTitle: 'Auto-distill on for this library — click to turn off',
+  qDistillOffTitle: 'Auto-distill off for this library — click to turn on',
+  qDistillOn: 'on',
+  qDistillOff: 'off',
+  qExecutorDown: '⚠️ Executor unavailable: {err} (queued items are kept; it resumes once a model is configured)',
+  qExecutorDownFallback: 'will retry shortly',
+  qRoute: '⚙️ Distill model: {provider}/{model}',
+  qRouteDefault: '(follows host default; set in Settings → Knowledge)',
+  qRouteOverride: '(set in settings)',
+  qDisabledBanner: 'Auto-distill is disabled in settings: material still enqueues for the record but is not processed; you can @ an agent to process it manually.',
+  qEmpty: 'Queue is empty: uploading material to raw/ auto-enqueues it for distilling.',
+  qViewOutput: 'View output',
+  qChunk: '(chunk {idx}/{total})',
+  qAttempt: '(attempt {n})',
+  newKbAria: 'New knowledge base',
+  newKbHeader: '📚 New knowledge base',
+  newKbNamePh: 'Name (defaults to the folder name)',
+  newKbRootPh: 'Absolute folder path (created if missing)',
+  newKbKind: 'Material library (scaffolds and can auto-distill; produced libraries are read-only)',
+  newKbAdding: 'Adding…',
+  newKbNote: 'Note: once added, this folder is browsable / uploadable via the LAN API.',
+  toastKbRootUnavailable: 'Knowledge base root unavailable',
+  toastInserted: '@{rel} inserted into the composer',
+  toastInsertCopied: 'Could not insert automatically — copied to clipboard; paste into the composer',
+  toastAskAiHint: 'Type a question in the search box first, then click "Ask AI"',
+  toastAskAiInserted: 'Question filled into the new-task page — send to let the agent answer with retrieval 🤖',
+  toastAskAiCopied: 'Could not insert automatically — question copied to clipboard; paste into the composer',
+  toastAskAiFail: 'Insert failed — paste the question into the composer manually',
+  toastFeedbackSaved: 'Feedback logged to wiki/meta/feedback.md ✅ (you can @ an agent to process it later)',
+  toastFeedbackAuto: 'Handed to a background agent 🤖 marks [done] when fixed (progress in the distill queue panel)',
+  toastFeedbackExecutorDownInserted: 'Executor unavailable — instruction written into the composer; send to run ⚠️',
+  toastFeedbackExecutorDownCopied: 'Executor unavailable — instruction copied to clipboard; paste and send',
+  toastFeedbackFail: 'Feedback failed: ',
+  toastUploadReadOnly: 'Produced libraries are read-only; upload is not supported',
+  toastUploadFail: 'Upload {name} failed: ',
+  toastUploaded: 'Uploaded {n} item(s) to {dir}/ · auto-distill enqueued ⚗️',
+  toastDelConfirm: 'Remove knowledge base "{name}"? Data on disk is unaffected.',
+  toastDelDone: 'Removed "{name}"',
+  toastDelFail: 'Remove failed: ',
+  toastOpFail: 'Operation failed: ',
+  toastAddDone: 'Added "{name}" and selected it',
+  toastAddFail: 'Add failed: ',
+  toastQueuePaused: 'Queue paused (finishes the current item)',
+  toastQueueResumed: 'Queue resumed',
+  toastQueueOpDone: 'Done',
+  toastQueueOpFail: 'Operation failed: ',
+  toastSessionUnavailable: 'Session service unavailable on this page',
+  toastSessionOpened: 'Opened bot chat',
+  toastToggleDistillFail: 'Operation failed: ',
+  promptAskAi: 'Please answer: {q}\nEvidence is from the knowledge base ({root}).',
+  promptAskAiHits: '\nInitial retrieval hits: {tops}.',
+  promptAskAiNoHit: '\nNo initial hits — use tools to keep searching the knowledge base root.',
+  promptAskAiTail: '\nRequirements: retrieve and verify before concluding; list sources (page paths) at the end; flag any claim that contradicts a library entry.',
+  promptAskAiRootFallback: 'see @ paths',
+  promptFeedback: '@{root}/{rel} Please review this feedback: "{note}". Following the current library rules, fix the page, then change the matching [open] line in wiki/meta/feedback.md to [done].',
+  settingsLabel: 'Knowledge',
+  settingsHint: 'Material uploaded to a knowledge base\'s raw/ is auto-enqueued and distilled into docs by a bot chat per schema; progress is in the "Distill" panel on the knowledge page.',
+  settingsLoadFail: 'Load failed',
+  settingsEnable: 'Enable auto-distill',
+  settingsProvider: 'Provider',
+  settingsModel: 'Model',
+  settingsTimeout: 'Per-item timeout (minutes)',
+  settingsMaxAttempts: 'Max retry on failure',
+  settingsSweep: 'Fallback sweep interval (seconds)',
+  settingsFollowDefault: 'Follow host default',
+  settingsProviderPh: 'e.g. deepseek-official',
+  settingsModelPh: 'Follow host default',
+  settingsPickModel: 'Pick a model (required)',
+  settingsPickModelAny: 'Pick a model',
+  settingsCurrentRoute: 'In effect: {provider}/{model} ({src})',
+  settingsRouteOverride: 'set in settings',
+  settingsRouteDefault: 'host default',
+  settingsSaved: '✓ Saved',
+  settingsSaveFail: 'Save failed: ',
+  dropHint: '⬇ Drop to upload material into the knowledge base (auto-distill enqueued)',
+  recentTitle: 'Recent updates',
+  recentSub: 'tail of log.md — click a path to jump',
+}
+
+/** t(key, vars)：bound 读当前激活语言；缺席回退 EN→ZH→key（对齐 dsh-process makeT）。 */
+function makeT(bound) {
+  return (key, vars) => {
+    let out = (bound && bound(key)) || EN[key] || ZH[key] || key
+    if (vars) for (const [k, v] of Object.entries(vars)) out = out.split('{' + k + '}').join(String(v))
+    return out
+  }
+}
+
+/** 模块级 t：apply 里 bind 后赋值；组件用 useT() 订阅语言切换重渲染，DOM 入口用 locale.subscribe。 */
+let t = makeT(null)
+
+/** locale 服务的订阅句柄（apply 里赋值）；组件通过 useT() 订阅它来随语言切换重渲染。 */
+let localeSubscribe = null
+/** 语言版本号：每次 locale 变化自增，useT 用它作为 useSyncExternalStore 的快照。 */
+let localeVersion = 0
+const localeListeners = new Set()
+function notifyLocale() {
+  localeVersion++
+  setDropVar()
+  for (const fn of localeListeners) { try { fn() } catch {} }
+}
+
+/** 按当前语言把拖拽提示写进 CSS 变量 --dsh-kb-drop（.kb-page.kb-drop::after 读它）。 */
+function setDropVar() {
+  if (typeof document === 'undefined') return
+  try { document.documentElement.style.setProperty('--dsh-kb-drop', "'" + String(t('dropHint')).replace(/'/g, "\\'") + "'") } catch {}
+}
+
+/** React hook：返回 t；语言切换时组件重渲染（订阅 locale 服务，缺席时 t 仍可用，只是不随切换刷新）。 */
+function useT() {
+  const subscribe = React.useCallback((cb) => {
+    localeListeners.add(cb)
+    const unsub = typeof localeSubscribe === 'function' ? localeSubscribe(cb) : null
+    return () => { localeListeners.delete(cb); if (typeof unsub === 'function') { try { unsub() } catch {} } }
+  }, [])
+  const getSnap = React.useCallback(() => localeVersion, [])
+  if (typeof React.useSyncExternalStore === 'function') React.useSyncExternalStore(subscribe, getSnap)
+  return t
+}
+
 /** 客户端会话服务（apply 时 ctx.inject(['sessions']) 懒注入；缺席时「打开会话」降级提示）。 */
 let sessionsSvc = null
 /** 客户端 uiWorkspace 服务（侧栏「新会话」按钮背后的导航服务；缺席时「问 AI」退回写当前输入框）。 */
@@ -118,7 +551,7 @@ styles.insert(`
 .kb-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:8px 16px;font-size:12px;z-index:2147483600;box-shadow:0 4px 16px rgba(0,0,0,.18)}
 .kb-counts{font-size:11px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))}
 input.kb-file{display:none}
-.kb-page.kb-drop::after{content:'⬇ 松开，上传素材到知识库（自动蒸馏入队）';position:absolute;inset:10px;border:2px dashed var(--dsw-alias-brand-primary);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 8%,transparent);pointer-events:none;z-index:10}
+.kb-page.kb-drop::after{content:var(--dsh-kb-drop,'⬇ 松开，上传素材到知识库（自动蒸馏入队）');position:absolute;inset:10px;border:2px dashed var(--dsw-alias-brand-primary);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 8%,transparent);pointer-events:none;z-index:10}
 .kb-up{border:0;background:transparent;color:var(--dsw-alias-brand-primary);font-size:12px;cursor:pointer;padding:0 2px}
 .kb-up:hover{color:var(--dsw-alias-brand-primary);opacity:.8}
 .kb-spin{padding:24px 0;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-size:12px}
@@ -248,7 +681,7 @@ function renderInline(text, nav) {
     } else if (m[3] !== undefined) {
       const target = m[3].trim()
       nodes.push(h('a', {
-        className: 'kb-md-wikilink', key: key++, title: '搜索「' + target + '」',
+        className: 'kb-md-wikilink', key: key++, title: t('wikilinkTitle', { t: target }),
         onClick: (e) => { e.preventDefault(); nav({ kind: 'search', q: target }) },
       }, target))
     } else if (m[5] !== undefined) {
@@ -416,7 +849,7 @@ function TreeSection(props) {
           h('span', { className: 'caret' }),
           h('span', null, '📄'),
           h('span', { className: 'nm', title: sub, onClick: () => onOpen(sub) }, e.name),
-          h('button', { className: 'at', title: '@ 给 agent', onClick: () => onAt(sub) }, '@'),
+          h('button', { className: 'at', title: t('atAgent'), onClick: () => onAt(sub) }, '@'),
         ))
       }
     }
@@ -426,8 +859,8 @@ function TreeSection(props) {
   return [
     h('div', { className: 'kb-side-h', key: rootRel },
       h('span', null, label),
-      props.onUpload && rootRel === 'raw' ? h('label', { className: 'kb-up', title: '上传素材到 raw/（自动蒸馏）' },
-        '⬆ 上传',
+      props.onUpload && rootRel === 'raw' ? h('label', { className: 'kb-up', title: t('uploadRawTitle') },
+        t('uploadRawBtn'),
         h('input', {
           type: 'file', multiple: true, className: 'kb-file',
           onChange: (e) => { const fs = Array.from(e.target.files || []); e.target.value = ''; if (fs.length && props.onUpload) props.onUpload('raw', fs) },
@@ -460,7 +893,7 @@ function RecentUpdates(props) {
 
   if (!items || !items.length) return null
   return h('div', { className: 'kb-recent' },
-    h('div', { className: 'kb-recent-h' }, '🕘 最近更新', h('span', { className: 'kb-recent-sub' }, 'log.md 尾部，点路径直达')),
+    h('div', { className: 'kb-recent-h' }, '🕘 ' + t('recentTitle'), h('span', { className: 'kb-recent-sub' }, t('recentSub'))),
     items.map((line, i) => {
       const m = /(wiki\/[^\s←]+)/.exec(line)
       if (!m) return h('div', { className: 'kb-recent-row', key: i }, line)
@@ -485,6 +918,7 @@ function RecentUpdates(props) {
 /** 右栏：文档阅读视图。 */
 function DocView(props) {
   const h = React.createElement
+  const tt = useT()
   const { rel, root, onNav, onAt, reloadTick, kb } = props
   const [state, setState] = React.useState({ status: 'loading' })
   const [fb, setFb] = React.useState(null) // null | {note, ask} 反馈对话框
@@ -499,8 +933,8 @@ function DocView(props) {
     return () => { alive = false }
   }, [rel, reloadTick])
 
-  if (state.status === 'loading') return h('div', { className: 'kb-spin' }, '加载中…')
-  if (state.status === 'error') return h('div', { className: 'kb-err' }, '读取失败：' + state.message)
+  if (state.status === 'loading') return h('div', { className: 'kb-spin' }, tt('loading'))
+  if (state.status === 'error') return h('div', { className: 'kb-err' }, tt('readFail') + state.message)
   const doc = state.doc
   const fm = doc.frontmatter || {}
   const inRaw = rel === 'raw' || rel.startsWith('raw/')
@@ -510,56 +944,56 @@ function DocView(props) {
 
   // 陈旧提示：frontmatter updated（缺省退回文件 mtime）超过 90 天
   const staleDays = (() => {
-    const t = Date.parse(fm.updated || '') || (doc.mtime || 0)
-    if (!t) return null
-    const d = Math.floor((Date.now() - t) / 86400000)
+    const upd = Date.parse(fm.updated || '') || (doc.mtime || 0)
+    if (!upd) return null
+    const d = Math.floor((Date.now() - upd) / 86400000)
     return d >= 90 ? d : null
   })()
 
   const meta = []
   if (fm.title) meta.push(h('span', { className: 'kb-chip title', key: 't' }, fm.title))
   if (fm.author) meta.push(h('span', { className: 'kb-chip', key: 'a' }, '👤 ' + fm.author))
-  if (fm.updated) meta.push(h('span', { className: 'kb-chip', key: 'u' }, '更新 ' + fm.updated))
-  if (Array.isArray(fm.tags) && fm.tags.length) fm.tags.forEach((t, i) => meta.push(h('span', { className: 'kb-chip', key: 'g' + i }, '#' + t)))
-  if (staleDays !== null) meta.push(h('span', { className: 'kb-chip stale', key: 's', title: '内容可能过时,建议核对或交 agent 复查' }, `⏳ ${staleDays} 天未更新`))
+  if (fm.updated) meta.push(h('span', { className: 'kb-chip', key: 'u' }, tt('updatedChip', { v: fm.updated })))
+  if (Array.isArray(fm.tags) && fm.tags.length) fm.tags.forEach((tg, i) => meta.push(h('span', { className: 'kb-chip', key: 'g' + i }, '#' + tg)))
+  if (staleDays !== null) meta.push(h('span', { className: 'kb-chip stale', key: 's', title: tt('staleTitle') }, tt('staleChip', { n: staleDays })))
 
   return h('div', null,
     meta.length ? h('div', { className: 'kb-meta' }, meta) : null,
     h('div', { className: 'kb-docbar' },
       h('span', { className: 'kb-docpath', title: rel }, rel + (doc.size != null ? ' · ' + fmtSize(doc.size) : '') + (doc.mtime ? ' · ' + fmtTime(doc.mtime) : '')),
-      h('button', { className: 'kb-btn', onClick: () => onAt(rel) }, '@ 给 agent'),
-      rel === 'schema.md' && props.onEditSchema ? h('button', { className: 'kb-btn', title: '编辑本库的加工约定（每库独立）', onClick: props.onEditSchema }, '✏️ 编辑约定') : null,
-      inWiki && isMd ? h('button', { className: 'kb-btn', title: '查看本页的修改历史,可恢复旧版本', onClick: () => onNav({ kind: 'history', rel }) }, '🕐 历史') : null,
-      isMd && props.onFeedback ? h('button', { className: 'kb-btn', title: '页面内容有误或缺漏?记入反馈,后台 agent 自动核实修正', onClick: () => setFb({ note: '', ask: true }) }, '⚠️ 反馈') : null,
-      doc.kind !== 'binary' ? h('a', { className: 'kb-btn', style: { textDecoration: 'none' }, href: apiFile(rel, true), title: '下载/导出本页' }, '⬇ 下载') : null,
-      doc.kind === 'binary' ? h('a', { className: 'kb-btn', style: { textDecoration: 'none' }, href: apiFile(rel, true) }, '下载') : null,
-      inRaw ? h('label', { className: 'kb-btn', style: { cursor: 'pointer' }, title: '上传到 ' + (dirOf || 'raw') },
-        '上传素材', h('input', { type: 'file', multiple: true, className: 'kb-file', onChange: (e) => props.onUpload(dirOf || 'raw', e.target.files), key: 'up' + rel + String(props.uploadTick || 0) }),
+      h('button', { className: 'kb-btn', onClick: () => onAt(rel) }, tt('docAtAgent')),
+      rel === 'schema.md' && props.onEditSchema ? h('button', { className: 'kb-btn', title: tt('editSchemaTitle'), onClick: props.onEditSchema }, tt('editSchemaBtn')) : null,
+      inWiki && isMd ? h('button', { className: 'kb-btn', title: tt('historyTitle'), onClick: () => onNav({ kind: 'history', rel }) }, tt('historyBtn')) : null,
+      isMd && props.onFeedback ? h('button', { className: 'kb-btn', title: tt('feedbackTitle'), onClick: () => setFb({ note: '', ask: true }) }, tt('feedbackBtn')) : null,
+      doc.kind !== 'binary' ? h('a', { className: 'kb-btn', style: { textDecoration: 'none' }, href: apiFile(rel, true), title: tt('downloadTitle') }, tt('downloadBtn')) : null,
+      doc.kind === 'binary' ? h('a', { className: 'kb-btn', style: { textDecoration: 'none' }, href: apiFile(rel, true) }, tt('downloadBinary')) : null,
+      inRaw ? h('label', { className: 'kb-btn', style: { cursor: 'pointer' }, title: tt('uploadToTitle', { dir: dirOf || 'raw' }) },
+        tt('uploadMaterial'), h('input', { type: 'file', multiple: true, className: 'kb-file', onChange: (e) => props.onUpload(dirOf || 'raw', e.target.files), key: 'up' + rel + String(props.uploadTick || 0) }),
       ) : null,
     ),
     // 反馈对话框
     fb && h('div', { className: 'kb-modal-mask', onMouseDown: (e) => { if (e.target === e.currentTarget) setFb(null) } },
-      h('div', { className: 'kb-modal', role: 'dialog', 'aria-label': '页面反馈' },
-        h('p', { className: 'kb-modal-h' }, '⚠️ 反馈：' + (fm.title || rel)),
+      h('div', { className: 'kb-modal', role: 'dialog', 'aria-label': tt('feedbackAria') },
+        h('p', { className: 'kb-modal-h' }, tt('feedbackHeader', { title: fm.title || rel })),
         h('textarea', {
           className: 'kb-schema-ta', style: { height: 120, minHeight: 120, resize: 'vertical' },
-          placeholder: '哪里有误/缺了什么/该补充什么…', autoFocus: true, value: fb.note,
+          placeholder: tt('feedbackPlaceholder'), autoFocus: true, value: fb.note,
           onChange: (e) => setFb((f) => ({ ...f, note: e.target.value })),
         }),
         h('label', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
           h('input', { type: 'checkbox', checked: fb.ask, onChange: (e) => setFb((f) => ({ ...f, ask: e.target.checked })) }),
-          '提交后自动交给 agent 后台处理（修完自动标 [done]，进度见蒸馏队列面板）',
+          tt('feedbackAuto'),
         ),
         h('div', { className: 'kb-modal-acts' },
-          h('button', { className: 'kb-btn', onClick: () => setFb(null) }, '取消'),
-          h('button', { className: 'kb-btn primary', disabled: !fb.note.trim(), onClick: () => { const cur = fb; setFb(null); props.onFeedback(rel, cur.note.trim(), cur.ask) } }, '提交'),
+          h('button', { className: 'kb-btn', onClick: () => setFb(null) }, tt('cancel')),
+          h('button', { className: 'kb-btn primary', disabled: !fb.note.trim(), onClick: () => { const cur = fb; setFb(null); props.onFeedback(rel, cur.note.trim(), cur.ask) } }, tt('submit')),
         ),
       ),
     ),
     doc.kind === 'md' ? h('div', { className: 'kb-md' }, renderMarkdown(doc.body, onNav)) : null,
     rel === 'index.md' ? h(RecentUpdates, { onNav, kb: props.kb }) : null,
     doc.kind === 'text' ? h('pre', { className: 'kb-md-pre' }, doc.body) : null,
-    doc.kind === 'binary' ? h('div', { className: 'kb-empty' }, '二进制/超大文件不支持在线阅读，可下载或 @ 给 agent 处理。') : null,
+    doc.kind === 'binary' ? h('div', { className: 'kb-empty' }, tt('binaryHint')) : null,
   )
 }
 
@@ -569,6 +1003,7 @@ function DocView(props) {
  */
 function SchemaEditor(props) {
   const h = React.createElement
+  const tt = useT()
   const { kb, kbName, onDone, onHint, onSaved } = props
   const [state, setState] = React.useState({ status: 'loading' })
 
@@ -590,30 +1025,30 @@ function SchemaEditor(props) {
         body: JSON.stringify({ text: state.text }),
       }))
       setState((s) => ({ ...s, dirty: false, exists: true }))
-      onHint('约定已保存 · 自动蒸馏与 agent 的下次加工即按新约定执行 ✅')
+      onHint(tt('schemaSavedHint'))
       if (onSaved) onSaved()
-    } catch (e) { onHint('保存失败：' + ((e && e.message) || e)) }
+    } catch (e) { onHint(tt('schemaSaveFail') + ((e && e.message) || e)) }
   }
 
   const resetDefault = async () => {
     try {
       const d = await readJson(await fetch(`${API}/schema/default`))
       setState((s) => ({ ...s, text: d.text, dirty: true }))
-    } catch (e) { onHint('获取默认模板失败：' + ((e && e.message) || e)) }
+    } catch (e) { onHint(tt('schemaResetFail') + ((e && e.message) || e)) }
   }
 
-  if (state.status === 'loading') return h('div', { className: 'kb-spin' }, '加载中…')
-  if (state.status === 'error') return h('div', { className: 'kb-err' }, '读取失败：' + state.message)
+  if (state.status === 'loading') return h('div', { className: 'kb-spin' }, tt('loading'))
+  if (state.status === 'error') return h('div', { className: 'kb-err' }, tt('readFail') + state.message)
   return h('div', { className: 'kb-schema' },
     h('div', { className: 'kb-docbar' },
-      h('span', { className: 'kb-docpath' }, `schema.md · 「${kbName || '主库'}」的加工约定`),
-      h('button', { className: 'kb-btn', title: '把编辑框内容换成默认模板（仍需点保存才写入）', onClick: resetDefault }, '恢复默认模板'),
-      h('button', { className: 'kb-btn', onClick: () => { if (!state.dirty || window.confirm('有未保存的修改，放弃并返回？')) onDone() } }, '取消'),
-      h('button', { className: 'kb-btn primary', disabled: !state.dirty, title: '⌘S / Ctrl+S', onClick: save }, '保存'),
+      h('span', { className: 'kb-docpath' }, tt('schemaPath', { name: kbName || tt('schemaMainLib') })),
+      h('button', { className: 'kb-btn', title: tt('schemaResetTitle'), onClick: resetDefault }, tt('schemaResetBtn')),
+      h('button', { className: 'kb-btn', onClick: () => { if (!state.dirty || window.confirm(tt('schemaDirtyConfirm'))) onDone() } }, tt('cancel')),
+      h('button', { className: 'kb-btn primary', disabled: !state.dirty, title: '⌘S / Ctrl+S', onClick: save }, tt('save')),
     ),
     h('p', { className: 'kb-schema-hint' },
-      h('b', null, '这份约定只作用于当前知识库'), '：kb-bot 自动蒸馏与交互 agent 加工前都会先读它（最终权威），改完保存即生效，无需重启。各库约定互不影响，可按库定制页面规范、目录用途与加工流程。',
-      !state.exists ? ' schema.md 当前不存在（曾被删除），保存后将按编辑框内容创建。' : null,
+      h('b', null, tt('schemaHintBold')), tt('schemaHint'),
+      !state.exists ? tt('schemaNotExist') : null,
     ),
     h('textarea', {
       className: 'kb-schema-ta', value: state.text, spellCheck: false,
@@ -631,6 +1066,7 @@ function SchemaEditor(props) {
 /** 右栏：wiki 页面版本历史（列表 → 查看/恢复）。快照由宿主 wiki/ 监视自动写入。 */
 function HistoryView(props) {
   const h = React.createElement
+  const tt = useT()
   const { rel, kb, onNav, onHint, onRestored } = props
   const [state, setState] = React.useState({ status: 'loading' })
   const [viewing, setViewing] = React.useState(null) // {ts, text}
@@ -648,20 +1084,20 @@ function HistoryView(props) {
     try {
       const d = await readJson(await fetch(`${API}/history/file?path=${encodeURIComponent(rel)}&ts=${encodeURIComponent(ts)}&kb=${encodeURIComponent(kb || 'main')}`))
       setViewing({ ts, text: d.text })
-    } catch (e) { onHint('读取版本失败：' + ((e && e.message) || e)) }
+    } catch (e) { onHint(tt('historyReadFail') + ((e && e.message) || e)) }
   }
 
   const restore = async (ts) => {
-    if (!window.confirm(`把「${rel}」恢复到 ${ts.slice(0, 15)} 的版本?当前内容将被覆盖(可再从历史恢复回来)。`)) return
+    if (!window.confirm(tt('historyRestoreConfirm', { rel, ts: ts.slice(0, 15) }))) return
     try {
       await readJson(await fetch(`${API}/history/restore?kb=${encodeURIComponent(kb || 'main')}`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ path: rel, ts }),
       }))
-      onHint('已恢复该版本 ✅')
+      onHint(tt('historyRestoredHint'))
       onRestored()
       onNav({ kind: 'doc', rel })
-    } catch (e) { onHint('恢复失败：' + ((e && e.message) || e)) }
+    } catch (e) { onHint(tt('historyRestoreFail') + ((e && e.message) || e)) }
   }
 
   const fmtTs = (f) => {
@@ -669,20 +1105,20 @@ function HistoryView(props) {
     return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : f
   }
 
-  if (state.status === 'loading') return h('div', { className: 'kb-spin' }, '加载中…')
-  if (state.status === 'error') return h('div', { className: 'kb-err' }, '读取失败：' + state.message)
+  if (state.status === 'loading') return h('div', { className: 'kb-spin' }, tt('loading'))
+  if (state.status === 'error') return h('div', { className: 'kb-err' }, tt('readFail') + state.message)
   return h('div', { className: 'kb-md', style: { maxWidth: 860 } },
     h('div', { className: 'kb-docbar' },
-      h('span', { className: 'kb-docpath' }, `🕐 ${rel} 的版本历史（${state.items.length}）`),
-      h('button', { className: 'kb-btn', onClick: () => onNav({ kind: 'doc', rel }) }, '← 返回页面'),
-      h('button', { className: 'kb-btn', onClick: load }, '刷新'),
+      h('span', { className: 'kb-docpath' }, tt('historyPath', { rel, n: state.items.length })),
+      h('button', { className: 'kb-btn', onClick: () => onNav({ kind: 'doc', rel }) }, tt('historyBack')),
+      h('button', { className: 'kb-btn', onClick: load }, tt('refresh')),
     ),
-    state.items.length === 0 ? h('div', { className: 'kb-empty' }, '还没有历史版本。页面被修改后,宿主会自动快照(内容有变化才记一个版本)。') : null,
+    state.items.length === 0 ? h('div', { className: 'kb-empty' }, tt('historyEmpty')) : null,
     viewing ? h('div', null,
       h('div', { className: 'kb-docbar' },
-        h('span', { className: 'kb-docpath' }, '版本 ' + fmtTs(viewing.ts)),
-        h('button', { className: 'kb-btn primary', onClick: () => restore(viewing.ts) }, '恢复此版本'),
-        h('button', { className: 'kb-btn', onClick: () => setViewing(null) }, '返回列表'),
+        h('span', { className: 'kb-docpath' }, tt('historyVer', { ts: fmtTs(viewing.ts) })),
+        h('button', { className: 'kb-btn primary', onClick: () => restore(viewing.ts) }, tt('historyRestoreBtn')),
+        h('button', { className: 'kb-btn', onClick: () => setViewing(null) }, tt('historyBackList')),
       ),
       h('pre', { className: 'kb-md-pre' }, viewing.text),
     ) : h('div', null, state.items.map((it) => h('div', { className: 'kb-q-row', key: it.ts },
@@ -691,8 +1127,8 @@ function HistoryView(props) {
         h('div', { className: 'kb-q-rel' }, fmtSize(it.size)),
       ),
       h('div', { className: 'kb-q-acts' },
-        h('button', { className: 'kb-btn', onClick: () => view(it.ts) }, '查看'),
-        h('button', { className: 'kb-btn', onClick: () => restore(it.ts) }, '恢复'),
+        h('button', { className: 'kb-btn', onClick: () => view(it.ts) }, tt('historyViewBtn')),
+        h('button', { className: 'kb-btn', onClick: () => restore(it.ts) }, tt('historyRestoreBtn2')),
       ),
     ))),
   )
@@ -701,6 +1137,7 @@ function HistoryView(props) {
 /** 右栏：搜索结果视图。 */
 function SearchView(props) {
   const h = React.createElement
+  const tt = useT()
   const { q, onNav, onAt, kb } = props
   const [state, setState] = React.useState({ status: 'loading' })
 
@@ -714,14 +1151,14 @@ function SearchView(props) {
     return () => { alive = false }
   }, [q])
 
-  if (state.status === 'loading') return h('div', { className: 'kb-spin' }, '搜索中…')
-  if (state.status === 'error') return h('div', { className: 'kb-err' }, '搜索失败：' + state.message)
+  if (state.status === 'loading') return h('div', { className: 'kb-spin' }, tt('searching'))
+  if (state.status === 'error') return h('div', { className: 'kb-err' }, tt('searchFail') + state.message)
   const d = state.data
   const hits = d.hits || []
-  if (!hits.length) return h('div', { className: 'kb-empty' }, `没有匹配「${q}」的内容`)
+  if (!hits.length) return h('div', { className: 'kb-empty' }, tt('searchNoHit', { q }))
   return h('div', null,
     h('p', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary))', margin: '0 0 12px' } },
-      `${hits.length} 个文件命中「${q}」· ${d.scanned || 0} 个文件已扫描 · ${d.durationMs || 0}ms`),
+      tt('searchSummary', { hits: hits.length, scanned: d.scanned || 0, ms: d.durationMs || 0 })),
     hits.map((hit, i) => h('div', { className: 'kb-hit', key: i },
       h('button', { className: 'kb-hit-file', onClick: () => onNav({ kind: 'doc', rel: hit.rel }) }, '📄', hit.rel),
       h('button', { className: 'kb-item', style: { width: 'auto', display: 'inline-flex', marginLeft: 8, padding: '0 6px', fontSize: 11 }, onClick: () => onAt(hit.rel) }, '@'),
@@ -731,81 +1168,86 @@ function SearchView(props) {
 }
 
 /** 蒸馏队列状态 chip 文案。 */
-const Q_STATUS_LABEL = { queued: '排队', running: '蒸馏中', done: '完成', failed: '失败', skipped: '跳过' }
-const FB_STATUS_LABEL = { queued: '排队', running: '处理中', done: '完成', failed: '失败' }
+function qStatusLabel(tt, k) {
+  return { queued: tt('qQueued'), running: tt('qRunning'), done: tt('qDone'), failed: tt('qFailed'), skipped: tt('qSkipped') }[k] || k
+}
+function fbStatusLabel(tt, k) {
+  return { queued: tt('fbQueued'), running: tt('fbRunning'), done: tt('fbDone'), failed: tt('fbFailed') }[k] || k
+}
 
 /** 跳到 bot 会话（客户端 sessions 服务 open(id)，dsh-process 同款懒解析）。 */
 function openKbSession(sessionId, hint) {
   const svc = sessionsSvc
-  if (!svc || typeof svc.open !== 'function') { hint('客户端会话服务不可用，无法跳转'); return }
-  try { svc.open(sessionId); hint('已打开 bot 会话') } catch (e) { hint(String((e && e.message) || e)) }
+  if (!svc || typeof svc.open !== 'function') { hint(t('toastSessionUnavailable')); return }
+  try { svc.open(sessionId); hint(t('toastSessionOpened')) } catch (e) { hint(String((e && e.message) || e)) }
 }
 
 /** 右栏：自动蒸馏队列视图（数据由 KbPage 统一轮询，这里只渲染+发起操作）。 */
 function QueueView(props) {
   const h = React.createElement
+  const tt = useT()
   const { data, kbs, onAction, onNav, onHint, onToggleDistill } = props
   const kbName = (id) => { const k = (kbs || []).find((x) => x.id === (id || 'main')); return k ? k.name : (id || 'main') }
   const distillKbs = (kbs || []).filter((k) => k.kind === 'material' && k.id !== 'main')
-  if (!data) return h('div', { className: 'kb-spin' }, '读取队列…')
+  if (!data) return h('div', { className: 'kb-spin' }, tt('loadingQueue'))
   const stats = data.stats || {}
   const statChips = ['running', 'queued', 'failed', 'done', 'skipped'].map((k) =>
-    h('span', { className: `kb-chip ${k}`, key: k }, `${Q_STATUS_LABEL[k]} ${stats[k] || 0}`))
+    h('span', { className: `kb-chip ${k}`, key: k }, `${qStatusLabel(tt, k)} ${stats[k] || 0}`))
   const items = data.items || []
   const fbTasks = data.feedback || []
   return h('div', null,
     fbTasks.length ? h('div', null,
-      h('div', { className: 'kb-q-model', style: { fontWeight: 600 } }, '⚠️ 反馈处理（后台自动，完成自动标 [done]）'),
-      fbTasks.map((t) => h('div', { className: 'kb-q-row', key: t.runId },
+      h('div', { className: 'kb-q-model', style: { fontWeight: 600 } }, tt('fbHeader')),
+      fbTasks.map((tk) => h('div', { className: 'kb-q-row', key: tk.runId },
         h('div', { className: 'kb-q-main' },
           h('div', { className: 'kb-q-name' },
-            h('span', { className: `kb-chip ${t.state === 'running' ? 'running' : t.state === 'done' ? 'done' : t.state === 'failed' ? 'failed' : 'queued'}` }, FB_STATUS_LABEL[t.state] || t.state),
-            ' ', t.rel.split('/').pop(),
+            h('span', { className: `kb-chip ${tk.state === 'running' ? 'running' : tk.state === 'done' ? 'done' : tk.state === 'failed' ? 'failed' : 'queued'}` }, fbStatusLabel(tt, tk.state)),
+            ' ', tk.rel.split('/').pop(),
           ),
-          h('div', { className: 'kb-q-rel' }, `[${kbName(t.kbId)}] ${t.rel}`),
-          t.note ? h('div', { className: `kb-q-note${t.state === 'failed' ? ' err' : ''}`, title: t.note }, t.note) : null,
-          t.error ? h('div', { className: 'kb-q-note err' }, t.error) : null,
+          h('div', { className: 'kb-q-rel' }, `[${kbName(tk.kbId)}] ${tk.rel}`),
+          tk.note ? h('div', { className: `kb-q-note${tk.state === 'failed' ? ' err' : ''}`, title: tk.note }, tk.note) : null,
+          tk.error ? h('div', { className: 'kb-q-note err' }, tk.error) : null,
         ),
         h('div', { className: 'kb-q-side' },
-          h('span', { className: 'kb-q-time' }, fmtTime(Date.parse(t.at))),
-          t.sessionId && t.state !== 'queued' ? h('div', { className: 'kb-q-acts' },
-            h('button', { className: 'kb-btn', onClick: () => openKbSession(t.sessionId, onHint) }, '打开会话')) : null,
+          h('span', { className: 'kb-q-time' }, fmtTime(Date.parse(tk.at))),
+          tk.sessionId && tk.state !== 'queued' ? h('div', { className: 'kb-q-acts' },
+            h('button', { className: 'kb-btn', onClick: () => openKbSession(tk.sessionId, onHint) }, tt('openSession'))) : null,
         ),
       )),
     ) : null,
     h('div', { className: 'kb-q-head' },
       h('div', { className: 'kb-q-stats' }, statChips,
-        data.enabled === false ? h('span', { className: 'kb-chip skipped' }, '自动蒸馏已停用（设置）') : null,
-        data.paused ? h('span', { className: 'kb-chip skipped' }, '已暂停') : null,
+        data.enabled === false ? h('span', { className: 'kb-chip skipped' }, tt('qDistillOff')) : null,
+        data.paused ? h('span', { className: 'kb-chip skipped' }, tt('qPaused')) : null,
       ),
       h('button', { className: 'kb-btn', onClick: () => onAction('pause', { paused: !(data.pausedByUser || data.paused) }) },
-        (data.pausedByUser || data.paused) ? '▶ 恢复' : '⏸ 暂停'),
-      h('button', { className: 'kb-btn', onClick: () => onAction('scan', {}) }, '扫描 raw/'),
+        (data.pausedByUser || data.paused) ? tt('qResume') : tt('qPause')),
+      h('button', { className: 'kb-btn', onClick: () => onAction('scan', {}) }, tt('qScanRaw')),
     ),
     distillKbs.length ? h('div', { className: 'kb-q-model' },
-      '素材库自动蒸馏：',
+      tt('qDistillLibs'),
       distillKbs.map((k) => h('button', {
         key: k.id, className: 'kb-btn', style: { marginLeft: 6, padding: '2px 8px', fontSize: 11.5 },
-        title: k.distillEnabled === false ? '该库自动蒸馏已关，点击开启' : '该库自动蒸馏已开，点击关闭',
+        title: k.distillEnabled === false ? tt('qDistillOffTitle') : tt('qDistillOnTitle'),
         onClick: () => onToggleDistill(k),
-      }, `${k.name} · ${k.distillEnabled === false ? '关' : '开'}`)),
+      }, `${k.name} · ${k.distillEnabled === false ? tt('qDistillOff') : tt('qDistillOn')}`)),
     ) : null,
     (data.executorDown || data.lastError) && h('div', { className: 'kb-q-banner' },
-      `⚠️ 执行器不可用：${data.lastError || '稍后自动重试'}（排队条目会保留，配置好模型后自动继续）`),
+      tt('qExecutorDown', { err: data.lastError || tt('qExecutorDownFallback') })),
     data.route ? h('div', { className: 'kb-q-model' },
-      `⚙️ 蒸馏模型：${data.route.provider}/${data.route.model}`,
-      data.route.source === 'default' ? h('span', { className: 'kb-q-model-hint' }, '（跟随宿主默认，设置 → 知识库 可指定）') : h('span', { className: 'kb-q-model-hint' }, '（设置中指定）'),
+      tt('qRoute', { provider: data.route.provider, model: data.route.model }),
+      data.route.source === 'default' ? h('span', { className: 'kb-q-model-hint' }, tt('qRouteDefault')) : h('span', { className: 'kb-q-model-hint' }, tt('qRouteOverride')),
     ) : null,
     data.enabled === false && h('div', { className: 'kb-q-banner' },
-      '自动蒸馏已在设置中停用：素材仍会入队留档，但不会执行；可手动 @ 给 agent 加工。'),
-    !items.length && h('div', { className: 'kb-empty' }, '队列为空：往 raw/ 上传素材后会自动入队蒸馏。'),
+      tt('qDisabledBanner')),
+    !items.length && h('div', { className: 'kb-empty' }, tt('qEmpty')),
     items.map((it) => h('div', { className: 'kb-q-row', key: it.id },
       h('div', { className: 'kb-q-main' },
         h('div', { className: 'kb-q-name' },
-          h('span', { className: `kb-chip ${it.status}` }, Q_STATUS_LABEL[it.status] || it.status),
+          h('span', { className: `kb-chip ${it.status}` }, qStatusLabel(tt, it.status)),
           ' ', it.rel.split('/').pop(),
-          it.chunk ? h('span', { className: 'kb-q-time' }, `（片 ${it.chunk.idx}/${it.chunk.total}）`) : null,
-          it.attempts > 1 ? h('span', { className: 'kb-q-time' }, `（第 ${it.attempts} 次）`) : null,
+          it.chunk ? h('span', { className: 'kb-q-time' }, tt('qChunk', { idx: it.chunk.idx, total: it.chunk.total })) : null,
+          it.attempts > 1 ? h('span', { className: 'kb-q-time' }, tt('qAttempt', { n: it.attempts })) : null,
         ),
         h('div', { className: 'kb-q-rel' }, `[${
           kbName(it.kbId)}] ${it.rel}`),
@@ -816,12 +1258,12 @@ function QueueView(props) {
         h('span', { className: 'kb-q-time' }, it.finishedAt || it.startedAt ? fmtTime(Date.parse(it.finishedAt || it.startedAt)) : ''),
         h('div', { className: 'kb-q-acts' },
           (it.status === 'done' || it.status === 'failed') && it.pages && it.pages.length
-            ? h('button', { className: 'kb-btn', onClick: () => onNav({ kind: 'doc', rel: it.pages[0] }) }, '看产出') : null,
+            ? h('button', { className: 'kb-btn', onClick: () => onNav({ kind: 'doc', rel: it.pages[0] }) }, tt('qViewOutput')) : null,
           it.sessionId && (it.status === 'running' || it.status === 'done' || it.status === 'failed')
-            ? h('button', { className: 'kb-btn', onClick: () => openKbSession(it.sessionId, onHint) }, '打开会话') : null,
+            ? h('button', { className: 'kb-btn', onClick: () => openKbSession(it.sessionId, onHint) }, tt('openSession')) : null,
           (it.status === 'failed' || it.status === 'done' || it.status === 'skipped')
-            ? h('button', { className: 'kb-btn', onClick: () => onAction('retry', { id: it.id }) }, '重试') : null,
-          it.status === 'queued' ? h('button', { className: 'kb-btn', onClick: () => onAction('cancel', { id: it.id }) }, '取消') : null,
+            ? h('button', { className: 'kb-btn', onClick: () => onAction('retry', { id: it.id }) }, tt('retry')) : null,
+          it.status === 'queued' ? h('button', { className: 'kb-btn', onClick: () => onAction('cancel', { id: it.id }) }, tt('cancel')) : null,
         ),
       ),
     )),
@@ -894,6 +1336,7 @@ async function fetchKbRoot() {
  *  点目录/文件一律 @绝对路径 插入。基础行每渲染从 props 推导，懒加载子行存 map。 */
 function KbDirPicker(props) {
   const h = React.createElement
+  const tt = useT()
   const { kbs, anchor, onPick } = props
   const [expanded, setExpanded] = React.useState({})
   const [children, setChildren] = React.useState({}) // 'kbId|rel' → 子行
@@ -933,10 +1376,10 @@ function KbDirPicker(props) {
     walk(k.id, '', `📚 ${k.name}`, 0)
     if (k.kind === 'material' && expanded[k.id + '|raw'] === true) {
       // raw/wiki 伪目录：展开时从 loadKids 的缓存取
-      walk(k.id, 'raw', 'raw · 原始素材', 1)
+      walk(k.id, 'raw', tt('treeRaw'), 1)
     }
     if (k.kind === 'material' && expanded[k.id + '|wiki'] === true) {
-      walk(k.id, 'wiki', 'wiki · 成文知识', 1)
+      walk(k.id, 'wiki', tt('treeWiki'), 1)
     }
   }
 
@@ -953,7 +1396,7 @@ function KbDirPicker(props) {
       },
     },
       expandable
-        ? h('button', { className: 'caret', 'aria-label': '展开', onClick: (e) => { e.stopPropagation(); toggle({ kbId: r.kbId, rel: r.rel }) } }, expanded[key] ? '▾' : '▸')
+        ? h('button', { className: 'caret', 'aria-label': tt('expandAria'), onClick: (e) => { e.stopPropagation(); toggle({ kbId: r.kbId, rel: r.rel }) } }, expanded[key] ? '▾' : '▸')
         : h('span', { className: 'caret' }),
       h('span', { className: 'nm' }, r.name),
     )
@@ -967,8 +1410,8 @@ function KbDirPicker(props) {
     maxHeight: Math.max(180, Math.min(380, anchor.top - 20)),
   }
   return h('div', { className: 'kbc-pop', style, role: 'dialog' },
-    h('div', { className: 'kbc-pop-h' }, '选择知识库目录或文件（@ 引用）'),
-    err && h('div', { className: 'kbc-pop-h' }, '加载失败：' + err),
+    h('div', { className: 'kbc-pop-h' }, tt('pickerTitle')),
+    err && h('div', { className: 'kbc-pop-h' }, tt('pickerLoadFail') + err),
     rowsView,
   )
 }
@@ -1054,6 +1497,7 @@ async function newTaskInsert(prompt) {
 /** composer 工具行按钮（conversation.input.left slot）。 */
 function KbComposerButtonSlot(props) {
   const h = React.createElement
+  const tt = useT()
   React.useEffect(ensureKbComposerStyles, [])
   React.useEffect(() => { kbLiveSessionId = props.sessionId }, [props.sessionId]) // 提交后记录——「问 AI」以它确认视图已切到目标会话
   const [picker, setPicker] = React.useState(null)
@@ -1076,8 +1520,8 @@ function KbComposerButtonSlot(props) {
     const text = `@${target.abs} `
     let ok = insertComposerText(composerScope, props.sessionId, liveInput.current, text)
     if (!ok) ok = insertTextViaDom(text) // 宿主事件通道不响应时直写输入区
-    if (ok) setMsg('✓ 已插入引用')
-    else { try { navigator.clipboard.writeText(text) } catch {} setMsg('无法自动插入，已复制到剪贴板') }
+    if (ok) setMsg(tt('insertedRef'))
+    else { try { navigator.clipboard.writeText(text) } catch {} setMsg(tt('insertFailCopied')) }
     close()
     setTimeout(() => setMsg(null), 2600)
     try {
@@ -1091,9 +1535,9 @@ function KbComposerButtonSlot(props) {
     : null
   return h(React.Fragment, null,
     h('button', {
-      className: 'kbc-chip', ref: btnRef, title: '基于知识库目录推理', 'aria-haspopup': 'dialog', 'aria-expanded': picker !== null,
+      className: 'kbc-chip', ref: btnRef, title: tt('composerBtnTitle'), 'aria-haspopup': 'dialog', 'aria-expanded': picker !== null,
       onClick: () => (picker === null ? open() : close()),
-    }, '📚 知识库'),
+    }, tt('composerBtnLabel')),
     popover,
     msg ? RDP.createPortal(h('div', { className: 'kbc-pop', style: { position: 'fixed', left: 12, bottom: 12, width: 'auto', maxHeight: 'none', padding: '8px 14px', fontSize: 12.5 } }, msg), document.body) : null,
   )
@@ -1156,8 +1600,20 @@ function mountKbSidebarEntry() {
   entry.type = 'button'
   entry.setAttribute(KB_ENTRY_ATTR, '')
   entry.className = 'dsh-kb-entry'
-  entry.title = '知识库 — 浏览 / 搜索 / 蒸馏队列'
-  entry.innerHTML = '<span class="dsh-kb-entry-icon">📚</span><span class="dsh-kb-entry-label">知识库</span><span class="dsh-kb-entry-stats"></span>'
+  const label = entry.appendChild(document.createElement('span'))
+  label.className = 'dsh-kb-entry-label'
+  const icon = document.createElement('span')
+  icon.className = 'dsh-kb-entry-icon'
+  icon.textContent = '📚'
+  entry.insertBefore(icon, label)
+  entry.appendChild(document.createElement('span')).className = 'dsh-kb-entry-stats'
+  // 标签/标题按当前语言渲染；语言切换时 notifyLocale → applyLabel 重刷（DOM 不在 React 树里）
+  const applyLabel = () => {
+    entry.title = t('sidebarTitle')
+    entry.setAttribute('aria-label', t('sidebarLabel'))
+    label.textContent = t('sidebarLabel')
+  }
+  applyLabel()
   entry.addEventListener('click', () => { if (kbOpen) kbOpen() })
   const stats = entry.querySelector('.dsh-kb-entry-stats')
   const refreshStats = () => {
@@ -1167,6 +1623,8 @@ function mountKbSidebarEntry() {
   }
   refreshStats()
   const poll = setInterval(refreshStats, 30000)
+  // 语言切换时刷新 DOM 入口文案（subscribe 在 apply 里挂到 localeSubscribe）
+  localeListeners.add(applyLabel)
   let root
   let placed = false
   const rootObserver = new MutationObserver(() => {
@@ -1189,6 +1647,7 @@ function mountKbSidebarEntry() {
     clearInterval(retry)
     waitObserver.disconnect()
     rootObserver.disconnect()
+    localeListeners.delete(applyLabel)
     try { entry.remove() } catch {}
   }
 }
@@ -1196,6 +1655,7 @@ function mountKbSidebarEntry() {
 /** 设置页「知识库」区块：自动蒸馏开关与模型路由下拉（GET/PUT /autodistill + GET /models）。 */
 function KbSettingsSection() {
   const h = React.createElement
+  const tt = useT()
   React.useEffect(ensureKbComposerStyles, [])
   const [st, setSt] = React.useState(null)
   const [saving, setSaving] = React.useState(false)
@@ -1214,7 +1674,7 @@ function KbSettingsSection() {
         sweepSec: d.settings.sweepSec,
       })
       setRoute(d.route)
-    }).catch(() => setMsg('加载失败'))
+    }).catch(() => setMsg(tt('settingsLoadFail')))
     fetch(`${API}/models`).then(readJson).then((d) => setProviders(d.providers || [])).catch(() => setProviders([]))
   }
   React.useEffect(load, [])
@@ -1229,30 +1689,30 @@ function KbSettingsSection() {
     h('span', { style: { flex: 1, minWidth: 0 } }, control),
   )
 
-  if (!st) return h('div', { className: 'kb-set-root' }, '加载中…')
+  if (!st) return h('div', { className: 'kb-set-root' }, tt('loading'))
 
   const providerSelect = providers.length
     ? (() => {
       const opts = providers.map((p) => h('option', { key: p.id, value: p.id }, p.name || p.id))
       if (st.provider && !providers.some((p) => p.id === st.provider)) opts.push(h('option', { key: '__cur', value: st.provider }, st.provider))
       return h('select', { className: 'kb-set-input', value: st.provider, onChange: (e) => setSt((s) => ({ ...s, provider: e.target.value, model: '' })) },
-        h('option', { value: '' }, '跟随宿主默认'),
+        h('option', { value: '' }, tt('settingsFollowDefault')),
         opts,
       )
     })()
-    : h('input', { className: 'kb-set-input', type: 'text', value: st.provider, placeholder: '如 deepseek-official', onChange: set('provider') })
+    : h('input', { className: 'kb-set-input', type: 'text', value: st.provider, placeholder: tt('settingsProviderPh'), onChange: set('provider') })
 
   const providerModels = (() => {
     const p = providers.find((x) => x.id === st.provider)
     return p ? p.models.map((m) => ({ id: m.id, name: m.name || m.id })) : []
   })()
   const modelControl = st.provider === ''
-    ? h('input', { className: 'kb-set-input', type: 'text', value: st.model, placeholder: '跟随宿主默认', disabled: providers.length > 0, onChange: set('model') })
+    ? h('input', { className: 'kb-set-input', type: 'text', value: st.model, placeholder: tt('settingsModelPh'), disabled: providers.length > 0, onChange: set('model') })
     : (() => {
       const opts = providerModels.map((m) => h('option', { key: m.id, value: m.id }, m.name))
       if (st.model && !providerModels.some((m) => m.id === st.model)) opts.push(h('option', { key: '__cur', value: st.model }, st.model))
       return h('select', { className: 'kb-set-input', value: st.model, onChange: set('model') },
-        h('option', { value: '' }, providerModels.length ? '选择模型（必填）' : '选择模型'),
+        h('option', { value: '' }, providerModels.length ? tt('settingsPickModel') : tt('settingsPickModelAny')),
         opts,
       )
     })()
@@ -1263,23 +1723,23 @@ function KbSettingsSection() {
       const d = await readJson(await fetch(`${API}/autodistill`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(st) }))
       setSt({ enabled: d.settings.enabled !== false, provider: d.settings.provider || '', model: d.settings.model || '', timeoutMin: d.settings.timeoutMin, maxAttempts: d.settings.maxAttempts, sweepSec: d.settings.sweepSec })
       setRoute(d.route)
-      setMsg('✓ 已保存')
-    } catch (e) { setMsg('保存失败：' + ((e && e.message) || e)) }
+      setMsg(tt('settingsSaved'))
+    } catch (e) { setMsg(tt('settingsSaveFail') + ((e && e.message) || e)) }
     setSaving(false)
     setTimeout(() => setMsg(null), 2600)
   }
 
   return h('div', { className: 'kb-set-root' },
-    h('p', { className: 'kb-set-hint', style: { margin: '0 0 10px' } }, '上传到知识库 raw/ 的素材自动入队，由 bot 会话按 schema 蒸馏成文；进度见知识库页「蒸馏队列」。'),
-    row('启用自动蒸馏', h('input', { type: 'checkbox', checked: st.enabled === true, onChange: set('enabled') })),
-    row('Provider', providerSelect),
-    row('Model', modelControl),
-    row('单条目超时（分钟）', h('input', { className: 'kb-set-input', type: 'number', value: st.timeoutMin == null ? '' : st.timeoutMin, onChange: set('timeoutMin') })),
-    row('失败重试上限', h('input', { className: 'kb-set-input', type: 'number', value: st.maxAttempts == null ? '' : st.maxAttempts, onChange: set('maxAttempts') })),
-    row('兜底扫描周期（秒）', h('input', { className: 'kb-set-input', type: 'number', value: st.sweepSec == null ? '' : st.sweepSec, onChange: set('sweepSec') })),
-    route ? h('div', { className: 'kb-set-hint' }, `当前生效：${route.provider}/${route.model}（${route.source === 'override' ? '设置指定' : '宿主默认'}）`) : null,
+    h('p', { className: 'kb-set-hint', style: { margin: '0 0 10px' } }, tt('settingsHint')),
+    row(tt('settingsEnable'), h('input', { type: 'checkbox', checked: st.enabled === true, onChange: set('enabled') })),
+    row(tt('settingsProvider'), providerSelect),
+    row(tt('settingsModel'), modelControl),
+    row(tt('settingsTimeout'), h('input', { className: 'kb-set-input', type: 'number', value: st.timeoutMin == null ? '' : st.timeoutMin, onChange: set('timeoutMin') })),
+    row(tt('settingsMaxAttempts'), h('input', { className: 'kb-set-input', type: 'number', value: st.maxAttempts == null ? '' : st.maxAttempts, onChange: set('maxAttempts') })),
+    row(tt('settingsSweep'), h('input', { className: 'kb-set-input', type: 'number', value: st.sweepSec == null ? '' : st.sweepSec, onChange: set('sweepSec') })),
+    route ? h('div', { className: 'kb-set-hint' }, tt('settingsCurrentRoute', { provider: route.provider, model: route.model, src: route.source === 'override' ? tt('settingsRouteOverride') : tt('settingsRouteDefault') })) : null,
     h('div', { style: { display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 } },
-      h('button', { className: 'kbc-chip', disabled: saving, onClick: save, style: saving ? { opacity: .6 } : null }, saving ? '保存中…' : '保存'),
+      h('button', { className: 'kbc-chip', disabled: saving, onClick: save, style: saving ? { opacity: .6 } : null }, saving ? tt('saving') : tt('save')),
       msg ? h('span', { className: 'kb-set-hint' }, msg) : null,
     ),
   )
@@ -1289,6 +1749,7 @@ function KbSettingsSection() {
 let kbOpen = null // 侧栏 DOM 入口 → 打开 overlay 的桥（KbPage 挂载时注册）
 function KbPage() {
   const h = React.createElement
+  const tt = useT()
   const [open, setOpen] = React.useState(false)
   React.useEffect(() => {
     kbOpen = () => setOpen(true)
@@ -1328,9 +1789,9 @@ function KbPage() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body || {}),
       }))
-      if (op !== 'scan') showHint(op === 'pause' ? (body.paused ? '队列已暂停（跑完当前为止）' : '队列已恢复') : '已执行')
+      if (op !== 'scan') showHint(op === 'pause' ? (body.paused ? tt('toastQueuePaused') : tt('toastQueueResumed')) : tt('toastQueueOpDone'))
     } catch (e) {
-      showHint(`操作失败：${(e && e.message) || e}`)
+      showHint(tt('toastQueueOpFail') + ((e && e.message) || e))
     }
     fetchQueue()
   }
@@ -1339,7 +1800,7 @@ function KbPage() {
     setError(null)
     fetch(`${API}/status?kb=${encodeURIComponent(kbId)}`)
       .then(readJson)
-      .then((s) => { setStatus(s); setReloadTick((t) => t + 1) })
+      .then((s) => { setStatus(s); setReloadTick((tk) => tk + 1) })
       .catch((e) => setError(String((e && e.message) || e)))
   }
 
@@ -1365,10 +1826,10 @@ function KbPage() {
 
   const atRel = (rel) => {
     const root = status && status.root ? String(status.root).replace(/\/+$/, '') : ''
-    if (!root) { showHint('知识库根不可用'); return }
+    if (!root) { showHint(tt('toastKbRootUnavailable')); return }
     setOpen(false)
     const result = insertFileRef(root + '/' + rel)
-    showHint(result === 'ok' ? `已把 @${rel} 插入输入框` : '无法自动插入，已复制到剪贴板，请在输入框粘贴')
+    showHint(result === 'ok' ? tt('toastInserted', { rel }) : tt('toastInsertCopied'))
   }
 
   const doSearch = () => {
@@ -1380,21 +1841,21 @@ function KbPage() {
   // 「🤖 问 AI」：先检索当前库,把命中页 @ 引用 + 问题落到「新建任务」页输入框,agent 带着依据作答
   const askAi = async () => {
     const q = query.trim()
-    if (!q) { showHint('先在搜索框输入问题,再点「问 AI」'); return }
+    if (!q) { showHint(tt('toastAskAiHint')); return }
     let hits = []
     try {
       hits = (await readJson(await fetch(`${API}/search?q=${encodeURIComponent(q)}&kb=${encodeURIComponent(kbId)}`))).hits || []
     } catch { /* 检索失败也给 agent 兜底指引 */ }
     const root = status && status.root ? String(status.root).replace(/\/+$/, '') : ''
     const tops = hits.slice(0, 5).map((x) => '@' + root + '/' + x.rel).join(' ')
-    const prompt = `请回答：${q}\n依据来自知识库（${root || '见 @ 路径'}）。`
-      + (tops ? `\n初步检索命中：${tops}。` : '\n初步检索无命中,请用工具在知识库根目录继续检索。')
-      + '\n要求：先检索核对再下结论；回答末尾列出依据（来源页面路径）；与库内条目矛盾的说法要明确指出。'
+    const prompt = tt('promptAskAi', { q, root: root || tt('promptAskAiRootFallback') })
+      + (tops ? tt('promptAskAiHits', { tops }) : tt('promptAskAiNoHit'))
+      + tt('promptAskAiTail')
     setOpen(false)
     const r = await newTaskInsert(prompt)
     if (r !== true) {
-      try { await navigator.clipboard.writeText(prompt); showHint('无法自动插入,问题已复制到剪贴板,请在输入框粘贴') } catch { showHint('插入失败,请手动把问题粘贴到输入框') }
-    } else showHint('已在新任务页填入问题,发送即让 agent 带检索回答 🤖')
+      try { await navigator.clipboard.writeText(prompt); showHint(tt('toastAskAiCopied')) } catch { showHint(tt('toastAskAiFail')) }
+    } else showHint(tt('toastAskAiInserted'))
   }
 
   // 页面反馈:记录进本库 wiki/meta/feedback.md;勾选自动处理时由后台会话执行,执行器缺席降级为写入输入框
@@ -1404,23 +1865,23 @@ function KbPage() {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ path: rel, note, auto: auto === true }),
       }))
-      setReloadTick((t) => t + 1)
-      if (!auto) { showHint('反馈已记入 wiki/meta/feedback.md ✅（可稍后 @ 给 agent 处理）'); return }
-      if (d.run) { showHint('已交给 agent 后台处理 🤖 修完自动标 [done]（进度见蒸馏队列面板）'); return }
+      setReloadTick((tk) => tk + 1)
+      if (!auto) { showHint(tt('toastFeedbackSaved')); return }
+      if (d.run) { showHint(tt('toastFeedbackAuto')); return }
       // 执行器不可用：降级为 composer 指令
       const root = status && status.root ? String(status.root).replace(/\/+$/, '') : ''
-      const instruction = `@${root}/${rel} 请核查这条反馈:「${note}」。按当前库 schema 修正页面后,把 wiki/meta/feedback.md 里对应行的 [open] 改为 [done]。`
+      const instruction = tt('promptFeedback', { root, rel, note })
       setOpen(false)
       const r = insertTextViaDom(instruction)
       if (r !== true) { try { await navigator.clipboard.writeText(instruction) } catch {} }
-      showHint(r === true ? '执行器不可用,处理指令已写入输入框,发送即执行 ⚠️' : '执行器不可用,指令已复制到剪贴板,请粘贴发送')
-    } catch (e) { showHint('反馈失败：' + ((e && e.message) || e)) }
+      showHint(r === true ? tt('toastFeedbackExecutorDownInserted') : tt('toastFeedbackExecutorDownCopied'))
+    } catch (e) { showHint(tt('toastFeedbackFail') + ((e && e.message) || e)) }
   }
 
   const upload = async (dir, files) => {
     if (!files || !files.length) return
     const cur = (kbs || []).find((k) => k.id === kbId)
-    if (cur && cur.kind !== 'material') { showHint('产出库只读，不支持上传'); return }
+    if (cur && cur.kind !== 'material') { showHint(tt('toastUploadReadOnly')); return }
     setError(null)
     const list = Array.from(files)
     let okCount = 0
@@ -1429,31 +1890,31 @@ function KbPage() {
         await readJson(await fetch(`${API}/upload?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(f.name)}&kb=${encodeURIComponent(kbId)}`, { method: 'POST', body: f }))
         okCount++
       } catch (e) {
-        setError(`上传 ${f.name} 失败：${(e && e.message) || e}`)
+        setError(tt('toastUploadFail', { name: f.name }) + ((e && e.message) || e))
       }
     }
-    if (okCount) showHint(`已上传 ${okCount} 个素材到 ${dir}/ · 自动蒸馏已入队 ⚗️`)
-    setUploadTick((t) => t + 1)
-    setReloadTick((t) => t + 1)
+    if (okCount) showHint(tt('toastUploaded', { n: okCount, dir }))
+    setUploadTick((tk) => tk + 1)
+    setReloadTick((tk) => tk + 1)
     fetchKbs(true).then((l) => setKbs(l || []))
   }
 
   // ── 多库管理 ──
   const delKb = async (k) => {
-    if (!window.confirm(`移除知识库「${k.name}」？磁盘数据不受影响。`)) return
+    if (!window.confirm(tt('toastDelConfirm', { name: k.name }))) return
     try {
       await readJson(await fetch(`${API}/kb/delete`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: k.id }) }))
       fetchKbs(true).then((l) => setKbs(l || []))
       if (kbId === k.id) setKbId('main')
-      setReloadTick((t) => t + 1)
-      showHint(`已移除「${k.name}」`)
-    } catch (e) { showHint('移除失败：' + ((e && e.message) || e)) }
+      setReloadTick((tk) => tk + 1)
+      showHint(tt('toastDelDone', { name: k.name }))
+    } catch (e) { showHint(tt('toastDelFail') + ((e && e.message) || e)) }
   }
   const toggleDistill = async (k) => {
     try {
       await readJson(await fetch(`${API}/kb/update`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: k.id, distillEnabled: k.distillEnabled === false }) }))
       fetchKbs(true).then((l) => setKbs(l || []))
-    } catch (e) { showHint('操作失败：' + ((e && e.message) || e)) }
+    } catch (e) { showHint(tt('toastToggleDistillFail') + ((e && e.message) || e)) }
   }
   const addKb = async () => {
     if (!adding) return
@@ -1465,9 +1926,9 @@ function KbPage() {
       setAdding(null)
       setKbId(d.kb.id) // 下拉框刷新后选中新建的知识库
       setNav({ kind: 'doc', rel: 'index.md' })
-      setReloadTick((t) => t + 1)
-      showHint(`已添加「${d.kb.name}」并选中`)
-    } catch (e) { showHint('添加失败：' + ((e && e.message) || e)) }
+      setReloadTick((tk) => tk + 1)
+      showHint(tt('toastAddDone', { name: d.kb.name }))
+    } catch (e) { showHint(tt('toastAddFail') + ((e && e.message) || e)) }
     setBusy(false)
   }
 
@@ -1519,69 +1980,69 @@ function KbPage() {
   const curKb = (kbs || []).find((k) => k.id === kbId)
   const queueBtn = h('button', {
     className: 'kb-btn', 'data-cur': nav.kind === 'queue',
-    title: '蒸馏队列（全局，跨库串行加工）',
+    title: tt('queueBtnTitle'),
     onClick: () => onNav({ kind: 'queue' }),
   },
-    '⚗️ 蒸馏队列',
+    tt('queueBtn'),
     qPending > 0 ? h('span', { className: `kb-q-badge${qFailed > 0 ? ' alert' : ''}`, style: { marginLeft: 4 } }, qPending) : null,
   )
 
   return h(React.Fragment, null,
-    h('button', { type: 'button', className: 'kb-trigger', onClick: () => setOpen(true), 'aria-label': '知识库' },
-      h('span', { 'aria-hidden': 'true' }, '📚'), h('span', null, '知识库')),
+    h('button', { type: 'button', className: 'kb-trigger', onClick: () => setOpen(true), 'aria-label': tt('sidebarTrigger') },
+      h('span', { 'aria-hidden': 'true' }, '📚'), h('span', null, tt('sidebarLabel'))),
     open && h('div', {
       className: 'kb-page' + (dropping ? ' kb-drop' : ''),
       role: 'dialog', 'aria-modal': 'true',
       onDragEnter, onDragOver, onDragLeave, onDrop,
     },
       h('div', { className: 'kb-head' },
-        h('p', { className: 'kb-title' }, '📚 知识库'),
+        h('p', { className: 'kb-title' }, tt('overlayTitle')),
         h('input', {
-          className: 'kb-search', placeholder: '全文搜索（Enter）…', value: query,
+          className: 'kb-search', placeholder: tt('searchPlaceholder'), value: query,
           onChange: (e) => setQuery(e.target.value),
           onKeyDown: (e) => { if (e.key === 'Enter' && !(e.isComposing === true)) doSearch() },
         }),
-        h('button', { className: 'kb-btn', title: '带着检索命中问 AI（写入输入框,agent 作答并附来源）', onClick: askAi }, '🤖 问 AI'),
+        h('button', { className: 'kb-btn', title: tt('askAiTitle'), onClick: askAi }, tt('askAiBtn')),
         h('span', { className: 'kb-root', title: status && status.root }, status && status.root ? status.root : ''),
         queueBtn,
-        h('label', { className: 'kb-btn primary', style: { cursor: 'pointer' }, title: '上传素材（自动蒸馏入队）' },
-          '⬆ 上传素材',
+        h('label', { className: 'kb-btn primary', style: { cursor: 'pointer' }, title: tt('uploadTitle') },
+          tt('uploadBtn'),
           h('input', {
             type: 'file', multiple: true, className: 'kb-file',
             onChange: (e) => { const fs = Array.from(e.target.files || []); e.target.value = ''; if (fs.length) upload(uploadTargetDir(), fs) },
           }),
         ),
-        h('button', { className: 'kb-btn', onClick: refresh }, '刷新'),
-        h('button', { className: 'kb-btn', onClick: () => setOpen(false) }, '✕ 关闭'),
+        h('button', { className: 'kb-btn', onClick: refresh }, tt('refresh')),
+        h('button', { className: 'kb-btn', onClick: () => setOpen(false) }, tt('close')),
       ),
       h('div', { className: 'kb-body' },
         h('div', { className: 'kb-side' },
           h('div', { className: 'kb-kbrow' },
             h('select', {
-              className: 'kb-kbsel', value: kbs ? kbId : '', title: '切换知识库', 'aria-label': '切换知识库',
+              className: 'kb-kbsel', value: kbs ? kbId : '', title: tt('switchKb'), 'aria-label': tt('switchKbAria'),
               onChange: (e) => { setKbId(e.target.value); setNav({ kind: 'doc', rel: 'index.md' }) },
             },
-              !kbs ? [h('option', { key: 'loading', value: '', disabled: true }, '加载中…')]
+              !kbs ? [h('option', { key: 'loading', value: '', disabled: true }, tt('kbLoading'))]
                 : (kbs || []).map((k) => h('option', { key: k.id, value: k.id },
                   (k.kind === 'produced' ? '📁 ' : '📚 ') + k.name)),
             ),
-            h('button', { className: 'kb-kbbtn', title: '新建知识库（素材库可自动蒸馏；产出库只读）', onClick: () => setAdding({ name: '', root: '', kind: 'material', distillEnabled: true }) }, '＋'),
-            curKb && curKb.id !== 'main' ? h('button', { className: 'kb-kbbtn danger', title: '移除当前知识库「' + curKb.name + '」（不删数据）', onClick: () => delKb(curKb) }, '✕') : null,
+            h('button', { className: 'kb-kbbtn', title: tt('newKbTitle'), onClick: () => setAdding({ name: '', root: '', kind: 'material', distillEnabled: true }) }, '＋'),
+            curKb && curKb.id !== 'main' ? h('button', { className: 'kb-kbbtn danger', title: tt('delKbTitle', { name: curKb.name }), onClick: () => delKb(curKb) }, '✕') : null,
           ),
-          quick('index.md', '目录', '📖'),
-          quick('log.md', '操作流水', '🧾'),
-          quick('schema.md', 'KB 约定', '📐'),
-          h(TreeSection, { rootRel: 'wiki', label: 'wiki · 成文知识', kb: kbId, cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, reloadTick }),
-          h(TreeSection, { rootRel: 'raw', label: 'raw · 素材（不可变）', kb: kbId, cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, onUpload: upload, reloadTick }),
+          quick('index.md', tt('quickIndex'), '📖'),
+          quick('log.md', tt('quickLog'), '🧾'),
+          quick('schema.md', tt('quickSchema'), '📐'),
+          h(TreeSection, { rootRel: 'wiki', label: tt('treeWiki'), kb: kbId, cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, reloadTick }),
+          h(TreeSection, { rootRel: 'raw', label: tt('treeRaw'), kb: kbId, cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, onUpload: upload, reloadTick }),
         ),
         h('div', { className: 'kb-main' },
           error && h('div', { className: 'kb-err' }, error),
           !error && nav.kind === 'doc' && h(DocView, { rel: nav.rel, root: status && status.root, kb: kbId, onNav, onAt: atRel, onUpload: upload, reloadTick, uploadTick, onFeedback: submitFeedback, onEditSchema: nav.rel === 'schema.md' ? () => onNav({ kind: 'schema-edit' }) : null }),
-          !error && nav.kind === 'history' && h(HistoryView, { rel: nav.rel, kb: kbId, onNav, onHint: showHint, onRestored: () => setReloadTick((t) => t + 1) }),
+          !error && nav.kind === 'history' && h(HistoryView, { rel: nav.rel, kb: kbId, onNav, onHint: showHint, onRestored: () => setReloadTick((tk) => tk + 1) }),
           !error && nav.kind === 'schema-edit' && h(SchemaEditor, {
             kb: kbId, kbName: curKb && curKb.name, onHint: showHint,
             onDone: () => onNav({ kind: 'doc', rel: 'schema.md' }),
-            onSaved: () => setReloadTick((t) => t + 1),
+            onSaved: () => setReloadTick((tk) => tk + 1),
           }),
           !error && nav.kind === 'search' && h(SearchView, { q: nav.q, kb: kbId, onNav, onAt: atRel }),
           !error && nav.kind === 'queue' && h(QueueView, { data: queueData, kbs, onToggleDistill: toggleDistill, onAction: queueAction, onNav, onHint: showHint }),
@@ -1589,27 +2050,27 @@ function KbPage() {
       ),
     ),
     adding && h('div', { className: 'kb-modal-mask', onMouseDown: (e) => { if (e.target === e.currentTarget) setAdding(null) } },
-      h('div', { className: 'kb-modal', role: 'dialog', 'aria-label': '新建知识库' },
-        h('p', { className: 'kb-modal-h' }, '📚 新建知识库'),
+      h('div', { className: 'kb-modal', role: 'dialog', 'aria-label': tt('newKbAria') },
+        h('p', { className: 'kb-modal-h' }, tt('newKbHeader')),
         h('input', {
-          className: 'kb-search kb-modal-in', placeholder: '名称（默认取目录名）', autoFocus: true, value: adding.name,
+          className: 'kb-search kb-modal-in', placeholder: tt('newKbNamePh'), autoFocus: true, value: adding.name,
           onChange: (e) => setAdding((a) => ({ ...a, name: e.target.value })),
           onKeyDown: (e) => { if (e.key === 'Enter' && !(e.isComposing === true) && adding.root.trim() && !busy) addKb() },
         }),
         h('input', {
-          className: 'kb-search kb-modal-in', placeholder: '文件夹绝对路径（不存在将自动创建）', value: adding.root,
+          className: 'kb-search kb-modal-in', placeholder: tt('newKbRootPh'), value: adding.root,
           onChange: (e) => setAdding((a) => ({ ...a, root: e.target.value })),
           onKeyDown: (e) => { if (e.key === 'Enter' && !(e.isComposing === true) && adding.root.trim() && !busy) addKb() },
         }),
         h('label', { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
           h('input', { type: 'checkbox', checked: adding.kind === 'material', onChange: (e) => setAdding((a) => ({ ...a, kind: e.target.checked ? 'material' : 'produced' })) }),
-          '素材库（建骨架并可自动蒸馏；产出库只读）',
+          tt('newKbKind'),
         ),
         h('div', { className: 'kb-modal-acts' },
-          h('button', { className: 'kb-btn', onClick: () => setAdding(null) }, '取消'),
-          h('button', { className: 'kb-btn primary', disabled: busy || !adding.root.trim(), onClick: addKb }, busy ? '添加中…' : '确定'),
+          h('button', { className: 'kb-btn', onClick: () => setAdding(null) }, tt('cancel')),
+          h('button', { className: 'kb-btn primary', disabled: busy || !adding.root.trim(), onClick: addKb }, busy ? tt('newKbAdding') : tt('confirm')),
         ),
-        h('div', { className: 'kb-modal-note' }, '注意：添加后该目录将可经局域网 API 浏览/上传。'),
+        h('div', { className: 'kb-modal-note' }, tt('newKbNote')),
       ),
     ),
     toast && h('div', { className: 'kb-toast' }, toast),
@@ -1618,12 +2079,30 @@ function KbPage() {
 
 module.exports = {
   name: '@weibaohui/dsh-kb',
-  inject: ['slots'],
+  inject: ['slots', 'locale'],
 
   apply(ctx) {
     const slots = ctx.get('slots')
     if (slots === undefined) return
     // 不 return 任何值（cordis-plugin-loader 把 apply 返回值当 disposable/effect）。
+
+    // i18n：注册 zh/en 词典并绑定 t（对齐 dsh-process / dsh-skill-explorer）。
+    // bound 在调用时读当前激活语言，所以组件每次重渲染都拿到新文案；
+    // 语言切换通过 ctx.locale.subscribe → notifyLocale 触发 useT 订阅者重渲染 + DOM 入口重刷。
+    try {
+      if (ctx.locale && typeof ctx.locale.register === 'function') {
+        ctx.locale.register(NS, 'zh', ZH)
+        ctx.locale.register(NS, 'en', EN)
+        const bound = typeof ctx.locale.bind === 'function' ? ctx.locale.bind(NS) : null
+        if (bound) t = makeT(bound)
+        if (typeof ctx.locale.subscribe === 'function') {
+          localeSubscribe = ctx.locale.subscribe
+          // 立即通知一次：让已挂载的 DOM 入口和 CSS 变量用 bound（而非兜底词典）刷新
+          notifyLocale()
+        }
+      }
+    } catch (e) { console.error('[dsh-kb] locale init:', e) }
+    setDropVar()
 
     // 会话服务：动态 inject（客户端 ctx 支持；缺席时「打开会话」降级提示）
     try {
@@ -1653,7 +2132,8 @@ module.exports = {
         name: 'settings.section',
         id: '@weibaohui/dsh-kb',
         order: 65,
-        label: () => '知识库',
+        locale: NS,
+        label: () => t('settingsLabel'),
         inject: () => ({}),
       }, function KbSettingsSlot() {
         return React.createElement(KbSettingsSection)
@@ -1670,7 +2150,8 @@ module.exports = {
         name: 'conversation.input.left',
         id: '@weibaohui/dsh-kb',
         order: 63,
-        label: () => '基于知识库推理',
+        locale: NS,
+        label: () => t('composerBtnTitle'),
         inject: () => ({}),
       }, function KbComposerSlot(apiProps) {
         return React.createElement(KbComposerButtonSlot, {
