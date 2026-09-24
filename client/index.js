@@ -420,12 +420,10 @@ function makeT(bound) {
   }
 }
 
-/** 模块级 t：apply 里 bind 后赋值；组件用 useT() 订阅语言切换重渲染，DOM 入口用 locale.subscribe。 */
+/** 模块级 t：apply 里 bind 后赋值；组件用 useT() 订阅语言切换重渲染，DOM 入口加入 localeListeners。 */
 let t = makeT(null)
 
-/** locale 服务的订阅句柄（apply 里赋值）；组件通过 useT() 订阅它来随语言切换重渲染。 */
-let localeSubscribe = null
-/** 语言版本号：每次 locale 变化自增，useT 用它作为 useSyncExternalStore 的快照。 */
+/** 语言版本号：locale 变化时自增（apply 里 ctx.locale.subscribe(notifyLocale) 驱动），useT 的快照。 */
 let localeVersion = 0
 const localeListeners = new Set()
 function notifyLocale() {
@@ -442,10 +440,11 @@ function setDropVar() {
 
 /** React hook：返回 t；语言切换时组件重渲染（订阅 locale 服务，缺席时 t 仍可用，只是不随切换刷新）。 */
 function useT() {
+  // subscribe 仅管理本地 localeListeners：locale 变化由 apply 里的 ctx.locale.subscribe(notifyLocale)
+  // 驱动，notifyLocale 自增 localeVersion（getSnap 读它）并通知所有监听者 → useSyncExternalStore 重渲染。
   const subscribe = React.useCallback((cb) => {
     localeListeners.add(cb)
-    const unsub = typeof localeSubscribe === 'function' ? localeSubscribe(cb) : null
-    return () => { localeListeners.delete(cb); if (typeof unsub === 'function') { try { unsub() } catch {} } }
+    return () => { localeListeners.delete(cb) }
   }, [])
   const getSnap = React.useCallback(() => localeVersion, [])
   if (typeof React.useSyncExternalStore === 'function') React.useSyncExternalStore(subscribe, getSnap)
@@ -1623,7 +1622,7 @@ function mountKbSidebarEntry() {
   }
   refreshStats()
   const poll = setInterval(refreshStats, 30000)
-  // 语言切换时刷新 DOM 入口文案（subscribe 在 apply 里挂到 localeSubscribe）
+  // 语言切换时刷新 DOM 入口文案：apply 里 ctx.locale.subscribe(notifyLocale) → localeListeners 回调 applyLabel
   localeListeners.add(applyLabel)
   let root
   let placed = false
@@ -2096,7 +2095,10 @@ module.exports = {
         const bound = typeof ctx.locale.bind === 'function' ? ctx.locale.bind(NS) : null
         if (bound) t = makeT(bound)
         if (typeof ctx.locale.subscribe === 'function') {
-          localeSubscribe = ctx.locale.subscribe
+          // 语言切换由 locale 服务回调 notifyLocale：自增 localeVersion（驱动 useT/useSyncExternalStore 重渲染）
+          // + 通知 localeListeners（DOM 入口 applyLabel 等）。必须以方法调用 ctx.locale.subscribe(fn) 触发，
+          // 裸赋值 localeSubscribe = ctx.locale.subscribe 会丢 this、回调时 this.listeners 抛 TypeError（0.7.7 回归）。
+          try { ctx.locale.subscribe(notifyLocale) } catch (e) { console.error('[dsh-kb] locale subscribe:', e) }
           // 立即通知一次：让已挂载的 DOM 入口和 CSS 变量用 bound（而非兜底词典）刷新
           notifyLocale()
         }
