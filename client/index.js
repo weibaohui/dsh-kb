@@ -3,7 +3,7 @@
 /**
  * @weibaohui/dsh-kb — Client half
  *
- * 侧栏底部入口（sidebar.footer.action）→ 全页知识库 overlay（dsh-tasks 同款交互）：
+ * 侧栏底部入口（sidebar.footer.action）→ 中栏接管知识库页（taskboard 同款：盖会话列不盖侧栏）：
  *  - 左栏：快捷入口（index/log/schema）+ wiki/ 与 raw/ 懒加载目录树 + 多库切换器；
  *  - 右栏：markdown 阅读渲染（frontmatter 徽章、[[wikilink]]、内部链接、图片、代码块）、
  *    全文搜索结果（内置扫描引擎，命中高亮）、蒸馏队列面板、
@@ -485,7 +485,15 @@ const styles = {
 styles.insert(`
 .kb-trigger{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font-size:12.5px;padding:7px 10px;border-radius:8px;cursor:pointer;text-align:left}
 .kb-trigger:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent);color:var(--dsw-alias-label-primary)}
-.kb-page{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}
+/* 中栏接管视图（taskboard 同款）：容器挂进会话列末尾，html 属性驱动开合，只隐藏列内兄弟。
+ * 三代壳层选择器兼容：dev shell data-pane / 官方 CSS-Module centerCol / Desktop 扩展框。 */
+.dsh-kb-view{display:none}
+html[data-dsh-kb-active] [data-pane="conversation"] > *:not([data-dsh-kb-view]),
+html[data-dsh-kb-active] [class*="centerCol"] > *:not([data-dsh-kb-view]),
+html[data-dsh-kb-active] .dshDesktopConversationSurface > *:not([data-dsh-kb-view]){display:none !important}
+html[data-dsh-kb-active] .dsh-kb-view{display:flex;flex-direction:column;height:100%;overflow:hidden}
+html[data-dsh-kb-active] .dsh-kb-view > .kb-trigger{display:none}
+.kb-page{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}
 .kb-head{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--dsw-alias-border-l2);flex:none;background:var(--dsw-alias-bg-layer-2)}
 .kb-title{font-size:15px;font-weight:600;margin:0;display:flex;align-items:center;gap:8px;flex:none;white-space:nowrap}
 .kb-root{font-size:11px;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary));font-family:var(--ds-font-family-code,ui-monospace,monospace);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
@@ -1580,6 +1588,42 @@ function placeKbEntry(root, entry) {
   return true
 }
 
+/**
+ * 中栏接管视图（taskboard board-mount 同款）：容器 div 追加为会话列的末尾子节点
+ * （React shell 不管理它），KbPage 常驻其中、`display:none` 待命；开合由
+ * html[data-dsh-kb-active] 属性驱动（CSS 隐藏列内兄弟，侧栏和会话列表保持可见）。
+ * 三代壳层选择器与侧栏入口同源：dev shell data-pane / 官方 CSS-Module / Desktop 扩展框。
+ */
+function mountKbView(RDClient) {
+  const COLUMN_SELECTOR = '[data-pane="conversation"], [class*="centerCol"], .dshDesktopConversationSurface'
+  let container = null
+  let root = null
+  const tryPlace = () => {
+    if (container && container.isConnected) return
+    const column = document.querySelector(COLUMN_SELECTOR)
+    if (!column) return
+    try { if (root) root.unmount() } catch {}
+    try { if (container) container.remove() } catch {}
+    container = document.createElement('div')
+    container.setAttribute('data-dsh-kb-view', '')
+    container.className = 'dsh-kb-view'
+    column.appendChild(container)
+    root = RDClient.createRoot(container)
+    root.render(React.createElement(KbPage))
+  }
+  const waitObserver = new MutationObserver(tryPlace)
+  waitObserver.observe(document.body, { childList: true, subtree: true })
+  const retry = setInterval(tryPlace, 2000)
+  tryPlace()
+  return () => {
+    clearInterval(retry)
+    waitObserver.disconnect()
+    try { if (root) root.unmount() } catch {}
+    try { if (container) container.remove() } catch {}
+    try { document.documentElement.removeAttribute(KB_ACTIVE_ATTR) } catch {}
+  }
+}
+
 function mountKbSidebarEntry() {
   let style = document.getElementById('dsh-kb-sidebar-style')
   if (!style) {
@@ -1591,6 +1635,7 @@ function mountKbSidebarEntry() {
 .dsh-kb-entry .dsh-kb-entry-icon{flex:none}
 .dsh-kb-entry .dsh-kb-entry-stats{margin-left:auto;display:inline-flex;gap:3px;font-size:11px;color:var(--dsw-alias-label-secondary,var(--dsw-text-secondary,gray));font-variant-numeric:tabular-nums;white-space:nowrap}
 [data-sidebar-collapsed] .dsh-kb-entry,[class*="_collapsed"] .dsh-kb-entry{width:36px;height:36px;min-width:36px;margin:0 0 12px;padding:0;justify-content:center;gap:0;text-align:center}
+html[data-dsh-kb-active] .dsh-kb-entry{background:var(--dsw-active,rgba(128,128,128,.18));color:var(--dsw-text-primary,inherit);font-weight:500}
 [data-sidebar-collapsed] .dsh-kb-entry .dsh-kb-entry-label,[data-sidebar-collapsed] .dsh-kb-entry .dsh-kb-entry-stats,[class*="_collapsed"] .dsh-kb-entry .dsh-kb-entry-label,[class*="_collapsed"] .dsh-kb-entry .dsh-kb-entry-stats{display:none}
 `
     document.head.appendChild(style)
@@ -1744,8 +1789,17 @@ function KbSettingsSection() {
   )
 }
 
-/** 全页知识库 overlay + 侧栏触发按钮。 */
-let kbOpen = null // 侧栏 DOM 入口 → 打开 overlay 的桥（KbPage 挂载时注册）
+/** 中栏接管知识库页 + 侧栏触发按钮（taskboard 同款：挂进会话列，html 属性驱动开合）。 */
+let kbOpen = null // 侧栏 DOM 入口 → 打开页面的桥（KbPage 挂载时注册）
+
+const KB_ACTIVE_ATTR = 'data-dsh-kb-active'
+const KB_PANEL_NAME = 'dsh-kb'
+const KB_ACTIVATE_EVENT = 'dsh-panel-activate'
+/** 兄弟面板的开合属性（本面板打开时清掉，保持同刻只开一个）。 */
+const KB_OTHER_ACTIVE_ATTRS = ['data-dsh-atb-active', 'data-dsh-taskboard-active', 'data-dsh-ssh-active', 'data-dsh-prc-active', 'data-dsh-git-active']
+/** 侧栏会话行（点击即回会话，面板自动关闭）。 */
+const KB_SIDEBAR_ROW_SELECTOR = '[class*="sessionRow"], [class*="projectRow"], [class*="searchResultRow"], [class*="newSession"]'
+
 function KbPage() {
   const h = React.createElement
   const tt = useT()
@@ -1754,6 +1808,38 @@ function KbPage() {
     kbOpen = () => setOpen(true)
     return () => { kbOpen = null }
   }, [])
+  // 兄弟面板激活 → 关自己（互斥协议，dsh-panel-activate 家族）
+  React.useEffect(() => {
+    const onOtherActivate = (e) => { if (e && e.detail !== KB_PANEL_NAME) setOpen(false) }
+    document.addEventListener(KB_ACTIVATE_EVENT, onOtherActivate)
+    return () => { document.removeEventListener(KB_ACTIVATE_EVENT, onOtherActivate) }
+  }, [])
+  // 点侧栏会话行自动关面板（自家入口子树豁免，防先关再开的竞态）
+  const openRef = React.useRef(false)
+  openRef.current = open
+  React.useEffect(() => {
+    const onClickRow = (e) => {
+      if (!openRef.current) return
+      const target = e.target
+      if (!(target instanceof Element)) return
+      if (target.closest('[data-dsh-kb-entry]')) return
+      if (target.closest(KB_SIDEBAR_ROW_SELECTOR)) setOpen(false)
+    }
+    document.addEventListener('click', onClickRow, true)
+    return () => { document.removeEventListener('click', onClickRow, true) }
+  }, [])
+  // open ↔ html 属性同步（useLayoutEffect：开/关都在绘制前生效，避免闪一帧空列）
+  React.useLayoutEffect(() => {
+    try {
+      if (open) {
+        for (const attr of KB_OTHER_ACTIVE_ATTRS) document.documentElement.removeAttribute(attr)
+        document.documentElement.setAttribute(KB_ACTIVE_ATTR, '')
+        document.dispatchEvent(new CustomEvent(KB_ACTIVATE_EVENT, { detail: KB_PANEL_NAME }))
+      } else {
+        document.documentElement.removeAttribute(KB_ACTIVE_ATTR)
+      }
+    } catch {}
+  }, [open])
   const [status, setStatus] = React.useState(null)
   const [nav, setNav] = React.useState({ kind: 'doc', rel: 'index.md' })
   const [query, setQuery] = React.useState('')
@@ -2115,16 +2201,13 @@ module.exports = {
       if (typeof ctx.inject === 'function') ctx.inject(['uiWorkspace'], (scope) => { uiWorkspaceSvc = scope && (scope.uiWorkspace || scope) })
     } catch (e) { console.error('[dsh-kb] uiWorkspace inject:', e) }
 
-    // 侧栏导航入口（工艺库下方，dsh-process 同款 DOM 注入）+ 隐藏挂载 overlay
+    // 侧栏导航入口（工艺库下方，dsh-process 同款 DOM 注入）+ 中栏接管视图（taskboard 同款挂载）
     try {
       const RDClient = require('react-dom/client')
       if (RDClient && typeof RDClient.createRoot === 'function') {
-        const mount = document.createElement('div')
-        mount.style.cssText = 'position:absolute;left:-9999px;top:0;width:0;height:0;'
-        document.body.appendChild(mount)
-        RDClient.createRoot(mount).render(React.createElement(KbPage))
+        const disposeView = mountKbView(RDClient)
         const disposeSidebar = mountKbSidebarEntry()
-        ctx.effect(() => () => { disposeSidebar(); try { RDClient.createRoot(mount).unmount() } catch {} }, 'dsh-kb: sidebar entry')
+        ctx.effect(() => () => { disposeSidebar(); disposeView() }, 'dsh-kb: sidebar entry')
       }
     } catch (e) { console.error('[dsh-kb] sidebar entry:', e) }
 
