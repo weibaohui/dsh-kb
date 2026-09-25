@@ -34,7 +34,6 @@ const name = 'dsh-kb'
 const inject = ['webServer', 'agents', 'agentDefaultModel', 'sessions', 'settings', 'llm', 'connection']
 const API_PREFIX = '/dsh-kb/api'
 
-const AUTO_NS = 'dsh-kb-autodistill'
 const DEFAULT_AUTO = { enabled: true, provider: '', model: '', timeoutMin: 20, maxAttempts: 2, sweepSec: 60 }
 
 /** dsh 数据根（与宿主一致：$DSH_HOME，缺省 ~/.dsh）。 */
@@ -67,6 +66,19 @@ function autoSettingsSchema() {
     sweepSec: Schema.number(),
   })
 }
+
+// 0.1.7 settings 服务：不再支持 ctx.settings.register，改为模块顶层导出 volatile
+// Config（宿主自动发现 + 自动生成设置页）。autoDistill 子对象整体标 volatile——
+// volatile 节点的整棵子树都可被设置 UI 投影与 ctx.settings.update 写回。
+// 读走 describe() 投影，写走 ctx.settings.update('dsh-kb', { autoDistill: patch })，
+// 持久化进 profile patch（重启不丢）。
+const Config = (() => {
+  try {
+    const S = loadSchemastery()
+    const auto = autoSettingsSchema()
+    return S && auto ? S.object({ autoDistill: auto.volatile() }) : null
+  } catch { return null }
+})()
 
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload)
@@ -386,6 +398,7 @@ module.exports = {
   name,
   inject,
   version: core.VERSION,
+  Config,
 
   apply(ctx, config = {}) {
     const logger = ctx.logger || { info() {}, warn() {}, error() {} }
@@ -410,21 +423,40 @@ module.exports = {
     const resolveKb = (kbId) => allKbs().find((k) => k.id === (kbId || 'main')) || null
     const distillTargets = () => allKbs().filter((k) => k.kind === 'material' && k.distillEnabled !== false)
 
-    // ── 设置（settings 服务缺席时退回 config/默认值） ──
-    let settingsScope = null
-    const autoOverrides = {} // settings 服务缺席时 PUT /autodistill 的运行时兜底
-    try {
-      if (ctx.settings && typeof ctx.settings.register === 'function') {
-        settingsScope = ctx.settings.register(AUTO_NS, autoSettingsSchema(), { base: { ...DEFAULT_AUTO, ...(config.autoDistill && typeof config.autoDistill === 'object' ? config.autoDistill : {}) } })
-      } else if (config.autoDistill && typeof config.autoDistill === 'object') {
-        settingsScope = { get: () => ({ ...config.autoDistill }) }
-      }
-    } catch (e) { logger.warn(`dsh-kb: settings register: ${(e && e.message) || e}`) }
-    const readAuto = () => {
-      let v = {}
-      try { if (settingsScope && typeof settingsScope.get === 'function') v = settingsScope.get() || {} } catch { v = {} }
-      return { ...DEFAULT_AUTO, ...(config.autoDistill || {}), ...autoOverrides, ...v }
+    // ── 0.1.7 settings 接线 ──
+    const autoOverrides = {} // 写回缺席/失败时的运行时兜底（仅本次运行有效）
+    function readAutoDescriptor() {
+      try {
+        if (!ctx.settings || typeof ctx.settings.describe !== 'function') return null
+        return ctx.settings.describe().find((x) => x.ns === name) || null
+      } catch { return null }
     }
+    let liveAuto = {} // settings 文档实时值（document-updated 事件驱动刷新）
+    // apply 时 loader 可能尚未就绪（describe 投影里还没有本插件条目），间隔重试
+    function refreshLiveAuto(attempt = 0) {
+      const d = readAutoDescriptor()
+      if (d) {
+        liveAuto = d.value && typeof d.value === 'object' && d.value.autoDistill && typeof d.value.autoDistill === 'object' ? d.value.autoDistill : {}
+        return
+      }
+      if (attempt < 15) setTimeout(() => { refreshLiveAuto(attempt + 1) }, 2000).unref?.()
+    }
+    refreshLiveAuto()
+    const readAuto = () => ({ ...DEFAULT_AUTO, ...(config.autoDistill || {}), ...liveAuto, ...autoOverrides })
+
+    // settings 文档变更（dsh 自动生成的设置页、本插件面板写回）刷新实时值
+    try {
+      if (ctx.on && typeof ctx.on === 'function') {
+        ctx.effect(() => {
+          const off = ctx.on('settings/document-updated', (ns) => {
+            if (ns !== name) return
+            const d = readAutoDescriptor()
+            if (d && d.value && typeof d.value === 'object' && d.value.autoDistill && typeof d.value.autoDistill === 'object') liveAuto = d.value.autoDistill
+          })
+          return () => { try { off() } catch {} }
+        }, 'dsh-kb: settings watch')
+      }
+    } catch { /* 事件订阅不可用：写回后靠 autoOverrides 维持本次运行 */ }
 
     // ── 队列（台账在知识库根之外：~/.dsh/dsh-kb/queue.json） ──
     const ledgerFile = join(dshHome(), 'dsh-kb', 'queue.json')
@@ -700,8 +732,11 @@ module.exports = {
               if (req.method === 'PUT' && rest === '/autodistill') {
                 const body = JSON.parse((await readBody(req)) || '{}')
                 const patch = queueCore.sanitizeAutoPatch(body)
-                if (settingsScope && typeof settingsScope.update === 'function') await settingsScope.update(patch)
-                else Object.assign(autoOverrides, patch)
+                Object.assign(autoOverrides, patch)
+                if (ctx.settings && typeof ctx.settings.update === 'function') {
+                  try { await ctx.settings.update(name, { autoDistill: patch }) }
+                  catch (e) { logger.warn(`dsh-kb: settings update 失败（仅本次运行生效）: ${(e && e.message) || e}`) }
+                }
                 sendJson(res, 200, { ok: true, settings: readAuto() })
                 return
               }
