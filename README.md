@@ -7,11 +7,11 @@
 
 基于 Karpathy LLM Wiki 模式：raw（不可变素材）→ wiki（成文知识）→ schema（约定），人丢素材、agent 两步加工（分析 → 成文）维护 index 与 log。
 
-![demo](https://raw.githubusercontent.com/weibaohui/dsh-kb/main/docs/demo-kb.gif)
+![demo](https://cdn.jsdelivr.net/gh/weibaohui/dsh-kb@main/docs/demo-kb.gif)
 
 **v0.2 自动蒸馏**：上传即自动入队，bot 会话按 schema 串行加工成文——「⚗️ 蒸馏队列」看进度，蒸馏模型可在设置中指定：
 
-![自动蒸馏](https://raw.githubusercontent.com/weibaohui/dsh-kb/main/docs/demo-autodistill.gif)
+![自动蒸馏](https://cdn.jsdelivr.net/gh/weibaohui/dsh-kb@main/docs/demo-autodistill.gif)
 
 ## 核心功能
 
