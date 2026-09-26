@@ -1,6 +1,6 @@
 ---
 name: dsh-kb
-description: 团队知识库（dsh-kb）的查询与沉淀。干活前先查知识库；踩坑、决策、复盘后按 schema 两步加工入库（分析→成文），矛盾必须显式标注，raw 素材不可变。适用于 FDE 离线盒子上的现场知识共享。| Query & distill the team knowledge base (dsh-kb): search before work, distill lessons/decisions/postmortems into wiki pages after work, mark contradictions explicitly, keep raw/ immutable.
+description: 团队知识库（dsh-kb）的查询与沉淀。干活前先查知识库；踩坑、决策、复盘后按 schema 两步加工入库（分析→成文），矛盾必须显式标注，raw 素材不可变。| Query & distill the team knowledge base (dsh-kb): search before work, distill lessons/decisions/postmortems into wiki pages after work, mark contradictions explicitly, keep raw/ immutable.
 ---
 
 # dsh-kb 团队知识库

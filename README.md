@@ -3,7 +3,7 @@
 [![DSH plugin](https://img.shields.io/badge/dsh-plugin-green)](https://github.com/topics/dsh-plugin)
 [![npm version](https://img.shields.io/npm/v/@weibaohui/dsh-kb)](https://www.npmjs.com/package/@weibaohui/dsh-kb)
 
-**dsh 插件 · 团队知识库**：离线知识共享（FDE 盒子场景）。侧栏入口进全页知识库——目录树浏览、全文搜索、markdown 阅读、raw 素材上传、任意条目 `@` 给 agent。**上传即自动蒸馏**（v0.2+）：素材入队后由 kb-bot 会话按 schema 串行加工成文，也可继续手动 `@` 给 agent 精加工。
+**dsh 插件 · 团队知识库**：跨会话、跨人的知识共享与沉淀。侧栏入口进全页知识库——目录树浏览、全文搜索、markdown 阅读、raw 素材上传、任意条目 `@` 给 agent。**上传即自动蒸馏**（v0.2+）：素材入队后由 kb-bot 会话按 schema 串行加工成文，也可继续手动 `@` 给 agent 精加工。
 
 基于 Karpathy LLM Wiki 模式：raw（不可变素材）→ wiki（成文知识）→ schema（约定），人丢素材、agent 两步加工（分析 → 成文）维护 index 与 log。
 
@@ -79,6 +79,7 @@ file-share 管**会话工作区**的文件（跟着会话 cwd 走）；dsh-kb �
 
 | 插件版本 | 适配 dsh 版本 | 备注 |
 |---------|--------------|------|
+| 0.7.12 | 0.1.7-rc.2 | 当前版本；去除 FDE 专用表述，定位为通用团队知识库 |
 | 0.7.11 | 0.1.7-rc.2 | 当前版本；适配 0.1.7 settings 模型（导出 volatile `Config`，`ctx.settings.update` 持久化），面板改动重启不再丢失 |
 | 0.7.10 | 0.1.7-rc.2 | 当前版本，已在 @deepseek-ai/dsh@0.1.7-rc.2 下验证运行 |
 | 0.7.9 | 0.1.7-rc.2 | 已在 @deepseek-ai/dsh@0.1.7-rc.2 下验证运行 |

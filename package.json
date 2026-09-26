@@ -1,6 +1,6 @@
 {
   "name": "@weibaohui/dsh-kb",
-  "version": "0.7.11",
+  "version": "0.7.12",
   "description": "dsh 插件 · 团队知识库：多库各有加工约定，上传素材由 bot 会话串行蒸馏成结构化文章；支持全文检索、问 AI 检索带来源作答、版本历史可回滚、页面反馈后台 agent 自动修正。",
   "main": "src/index.js",
   "exports": {
@@ -47,8 +47,6 @@
     "wiki",
     "llm-wiki",
     "auto-distill",
-    "fde",
-    "offline",
     "full-text-search"
   ]
 }
