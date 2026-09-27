@@ -79,8 +79,9 @@ file-share 管**会话工作区**的文件（跟着会话 cwd 走）；dsh-kb �
 
 | 插件版本 | 适配 dsh 版本 | 备注 |
 |---------|--------------|------|
-| 0.7.12 | 0.1.7-rc.2 | 当前版本；去除 FDE 专用表述，定位为通用团队知识库 |
-| 0.7.11 | 0.1.7-rc.2 | 当前版本；适配 0.1.7 settings 模型（导出 volatile `Config`，`ctx.settings.update` 持久化），面板改动重启不再丢失 |
+| 0.7.15 | 0.1.7-rc.2 | 当前版本；修复降级路径 Config 导出 null——宿主 settings schema() 不排除 null，会炸 settings.describe() 拖垮整份设置文档（同 dsh-continue#4） |
+| 0.7.12 | 0.1.7-rc.2 | 去除 FDE 专用表述，定位为通用团队知识库 |
+| 0.7.11 | 0.1.7-rc.2 | 适配 0.1.7 settings 模型（导出 volatile `Config`，`ctx.settings.update` 持久化），面板改动重启不再丢失 |
 | 0.7.10 | 0.1.7-rc.2 | 当前版本，已在 @deepseek-ai/dsh@0.1.7-rc.2 下验证运行 |
 | 0.7.9 | 0.1.7-rc.2 | 已在 @deepseek-ai/dsh@0.1.7-rc.2 下验证运行 |
 | 0.7.8 | 0.1.7-rc.2 | 已在 @deepseek-ai/dsh@0.1.7-rc.2 下验证运行 |
