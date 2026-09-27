@@ -72,12 +72,15 @@ function autoSettingsSchema() {
 // volatile 节点的整棵子树都可被设置 UI 投影与 ctx.settings.update 写回。
 // 读走 describe() 投影，写走 ctx.settings.update('dsh-kb', { autoDistill: patch })，
 // 持久化进 profile patch（重启不丢）。
+// 持久化进 profile patch（重启不丢）。降级值必须是 undefined 而非 null：宿主
+// settings 的 schema() 只排除 undefined，"toJSON" in null 会抛 TypeError 逃出
+// describe()，拖垮整份设置文档（同 dsh-continue#4）。
 const Config = (() => {
   try {
     const S = loadSchemastery()
     const auto = autoSettingsSchema()
-    return S && auto ? S.object({ autoDistill: auto.volatile() }) : null
-  } catch { return null }
+    return S && auto ? S.object({ autoDistill: auto.volatile() }) : undefined
+  } catch { return undefined }
 })()
 
 function sendJson(res, status, payload) {
