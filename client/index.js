@@ -17,7 +17,14 @@
  * 自包含：只依赖注入的 react（createElement/hooks），不用 react-dom 等平台模块。
  */
 
-const API = '/dsh-kb/api'
+// API 基址随页面走：子路径反代（如 https://host/app/dsh/）下，绝对路径 /dsh-kb/api
+// 会打到站点根而 404。与宿主官方客户端一致，用 document.baseURI 推导（dsh-sync#14 同款）。
+const API = (() => {
+  try {
+    const base = (typeof document !== 'undefined' && document.baseURI) || (typeof location !== 'undefined' ? location.href : '/')
+    return new URL('dsh-kb/api', new URL('.', base)).pathname.replace(/\/+$/, '')
+  } catch { return '/dsh-kb/api' }
+})()
 
 const NS = 'dshKb'
 
