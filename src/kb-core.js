@@ -26,6 +26,7 @@ const RAW_DIR = 'raw'
 const WIKI_DIR = 'wiki'
 const SCHEMA_FILE = 'schema.md'
 const SCHEMA_MAX_BYTES = 256 * 1024       // 库约定编辑保存上限
+const DOC_MAX_BYTES = 1024 * 1024          // wiki 正文编辑保存上限（人工编辑入口）
 const BOOT_DIRS = [RAW_DIR, path.join(WIKI_DIR, 'howtos'), path.join(WIKI_DIR, 'decisions'), path.join(WIKI_DIR, 'postmortems'), path.join(WIKI_DIR, 'notes')]
 const BOOT_FILES = ['index.md', 'log.md', 'schema.md']
 
@@ -450,6 +451,120 @@ function writeSchema(root, text) {
   return { size: body.length }
 }
 
+/**
+ * wiki 正文（人工编辑入口）：只允许「已存在」的 wiki/ 下的文本页，原子写。
+ * 与 writeSchema 同一受控思路：白名单目录 + 软链越界拒绝 + 大小上限；
+ * 写后把属组/权限归一化为 root:1001 / 664，保证共享区（飞牛 / 电脑端）继续可读写。
+ */
+function writeDoc(root, rel, text) {
+  if (typeof text !== 'string' || !text.trim()) throw new KbError(400, '正文内容不能为空')
+  const relStr = safeWikiRel(rel)
+  if (!relStr) throw new KbError(403, '只允许编辑 wiki/ 下的页面')
+  const ext = path.extname(relStr).slice(1).toLowerCase()
+  if (!TEXT_EXT.has(ext)) throw new KbError(415, '只支持文本类页面')
+  const body = Buffer.from(text, 'utf8')
+  if (body.length > DOC_MAX_BYTES) throw new KbError(413, '超过大小上限 ' + DOC_MAX_BYTES + ' 字节')
+  const abs = resolveExisting(root, relStr, 'file')
+  const wikiReal = fs.realpathSync(path.join(ensureRoot(root), WIKI_DIR))
+  const real = fs.realpathSync(abs)
+  const relToWiki = path.relative(wikiReal, real)
+  if (!relToWiki || relToWiki.startsWith('..') || path.isAbsolute(relToWiki)) throw new KbError(403, '只允许编辑 wiki/ 下的页面')
+  const tmp = abs + '.dsh-tmp-' + process.pid + '-' + crypto.randomBytes(4).toString('hex')
+  try {
+    fs.writeFileSync(tmp, body)
+    fs.renameSync(tmp, abs)
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }) } catch {}
+    throw e
+  }
+  try { fs.chownSync(abs, 0, 1001); fs.chmodSync(abs, 0o664) } catch {}
+  return { rel: relStr, size: body.length }
+}
+
+/**
+ * 回收站（软删除）：把文件移到库根之外的 trash 目录，文件名平铺编码原路径，可随时还原。
+ * 白名单：仅 wiki/ 与 raw/ 下的「已存在文件」——index.md / log.md / schema.md 天然不在范围内。
+ * 删除只搬文件，不动 wiki 版本快照：即便回收站被清空，仍可从「🕐 历史」重建内容。
+ */
+function trashableRel(rel) {
+  const r = String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '')
+  if (!r || r.split('/').includes('..') || r.includes('\0')) return null
+  if (!(r.startsWith(WIKI_DIR + '/') || r.startsWith(RAW_DIR + '/'))) return null
+  return r
+}
+function trashStamp() { return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '') }
+// rel 用 base64url 编码进文件名：可逆且无歧义。不能按分隔符平铺（如把 '/' 换成 '__'）——
+// 文件名本身含 '__' 时还原会被错误解码成子目录，路径错乱。
+function encodeTrashName(rel, stamp) { return Buffer.from(rel, 'utf8').toString('base64url') + '.del-' + stamp + '-' + crypto.randomBytes(3).toString('hex') }
+function decodeTrashName(name) {
+  const m = /^(.*)\.del-(\d{8}T\d{6})-([0-9a-f]{6})$/.exec(String(name || ''))
+  if (!m) return null
+  try {
+    const rel = Buffer.from(m[1], 'base64url').toString('utf8')
+    if (Buffer.from(rel, 'utf8').toString('base64url') !== m[1]) return null // 非规范化输入（伪造/损坏）一律拒收
+    return { rel, stamp: m[2] }
+  } catch { return null }
+}
+function safeTrashPath(trashKbDir, entry) {
+  const p = path.join(trashKbDir, path.basename(String(entry || '')))
+  if (!decodeTrashName(path.basename(p))) throw new KbError(400, '非法回收线条目')
+  if (!fs.existsSync(p)) throw new KbError(404, '回收站里没有这一项')
+  return p
+}
+function moveAcross(src, dst) {
+  try { fs.renameSync(src, dst); return } catch (e) { if (!e || e.code !== 'EXDEV') throw e }
+  fs.copyFileSync(src, dst)
+  fs.unlinkSync(src)
+}
+function trashDoc(root, trashKbDir, rel) {
+  const r = trashableRel(rel)
+  if (!r) throw new KbError(403, '只允许删除 wiki/ 或 raw/ 下的文件（index/log/schema 不开放删除）')
+  const abs = resolveExisting(root, r, 'file')
+  fs.mkdirSync(trashKbDir, { recursive: true })
+  const dst = path.join(trashKbDir, encodeTrashName(r, trashStamp()))
+  const size = fs.statSync(abs).size
+  moveAcross(abs, dst)
+  return { rel: r, entry: path.basename(dst), size }
+}
+function listTrash(trashKbDir) {
+  if (!fs.existsSync(trashKbDir)) return { items: [] }
+  const items = []
+  for (const name of fs.readdirSync(trashKbDir)) {
+    const p = path.join(trashKbDir, name)
+    let st
+    try { st = fs.statSync(p) } catch { continue }
+    if (!st.isFile()) continue
+    const dec = decodeTrashName(name)
+    if (!dec) continue
+    items.push({ entry: name, rel: dec.rel, deletedAt: dec.stamp, size: st.size, mtime: Math.round(st.mtimeMs) })
+  }
+  items.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt))
+  return { items }
+}
+function restoreTrash(root, trashKbDir, entry) {
+  const src = safeTrashPath(trashKbDir, entry)
+  const dec = decodeTrashName(path.basename(src))
+  const abs = resolveCreatable(root, dec.rel)
+  fs.mkdirSync(path.dirname(abs), { recursive: true })
+  moveAcross(src, abs)
+  try { fs.chownSync(abs, 0, 1001); fs.chmodSync(abs, 0o664) } catch {}
+  return { rel: dec.rel, size: fs.statSync(abs).size }
+}
+function purgeTrash(trashKbDir, entry) {
+  const src = safeTrashPath(trashKbDir, entry)
+  const dec = decodeTrashName(path.basename(src))
+  fs.unlinkSync(src)
+  return { rel: dec.rel, purged: 1 }
+}
+function purgeAllTrash(trashKbDir) {
+  let n = 0
+  if (fs.existsSync(trashKbDir)) for (const name of fs.readdirSync(trashKbDir)) {
+    const p = path.join(trashKbDir, name)
+    try { if (fs.statSync(p).isFile() && decodeTrashName(name)) { fs.unlinkSync(p); n++ } } catch {}
+  }
+  return { purged: n }
+}
+
 /** 骨架自举：目录 + 三个约定文件，已存在的一律不覆盖。返回新建内容列表。 */
 function bootstrap(root, logger = { info() {}, warn() {} }) {
   const rootAbs = ensureRoot(root)
@@ -659,7 +774,8 @@ module.exports = {
   REGISTRY_VERSION, loadKbRegistry, saveKbRegistry, newKbId, normalizeKbRoot, kbRootsOverlap,
   ensureRoot, resolveExisting, resolveCreatable, lexicalAbs, cleanSegment,
   listDir, parseFrontmatter, readDoc, sendFile, search, uploadRaw,
-  readSchema, writeSchema,
+  readSchema, writeSchema, writeDoc,
+  trashDoc, listTrash, restoreTrash, purgeTrash, purgeAllTrash,
   safeWikiRel, snapWikiTree, listSnapshots, readSnapshot, restoreSnapshot, appendFeedback,
   SNAP_MAX_BYTES, SNAP_KEEP,
   statusPayload, bootstrap, defaultRoot,

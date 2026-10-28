@@ -490,6 +490,8 @@ module.exports = {
     const kbWatchers = new Map() // kbId → fs.Watcher
     const historyRoot = join(dshHome(), 'dsh-kb', 'history')
     const histDirOf = (kbId) => join(historyRoot, kbId || 'main')
+    const trashRoot = join(dshHome(), 'dsh-kb', 'trash')
+    const trashDirOf = (kbId) => join(trashRoot, kbId || 'main')
     const snapKbWiki = (kb) => { try { core.snapWikiTree(kb.root, histDirOf(kb.id)) } catch { /* 下一轮再试 */ } }
     const watchKb = (kb) => {
       if (kbWatchers.has(kb.id) || kb.kind !== 'material' || kb.distillEnabled === false) return
@@ -590,6 +592,39 @@ module.exports = {
                 const body = JSON.parse((await readBody(req, 512 * 1024)) || '{}')
                 const r = core.writeSchema(kb.root, body.text)
                 sendJson(res, 200, { ok: true, kb: kb.id, ...r })
+                return
+              }
+              // ── wiki 正文编辑（人工编辑入口：只允许 wiki/ 下已存在的文本页；保存自动进版本历史） ──
+              if (req.method === 'PUT' && rest === '/doc') {
+                if (kb.kind !== 'material') { sendJson(res, 403, { ok: false, error: '产出库只读，不支持编辑正文' }); return }
+                const body = JSON.parse((await readBody(req, 2 * 1024 * 1024)) || '{}')
+                const r = core.writeDoc(kb.root, body.path, body.text)
+                logger.info('dsh-kb: [' + kb.id + '] 正文保存 ' + r.rel + '（' + r.size + 'B）')
+                sendJson(res, 200, { ok: true, kb: kb.id, ...r })
+                return
+              }
+              // ── 回收站（软删除 / 还原 / 彻底删除；仅 wiki/ 与 raw/ 下文件） ──
+              if (req.method === 'DELETE' && rest === '/doc') {
+                if (kb.kind !== 'material') { sendJson(res, 403, { ok: false, error: '产出库只读，不支持删除' }); return }
+                const r = core.trashDoc(kb.root, trashDirOf(kb.id), q.get('path') || '')
+                logger.info('dsh-kb: [' + kb.id + '] 删除进回收站 ' + r.rel + '（' + r.size + 'B）')
+                sendJson(res, 200, { ok: true, kb: kb.id, ...r })
+                return
+              }
+              if (req.method === 'GET' && rest === '/trash') {
+                sendJson(res, 200, { ok: true, kb: kb.id, ...core.listTrash(trashDirOf(kb.id)) })
+                return
+              }
+              if (req.method === 'POST' && rest.startsWith('/trash/')) {
+                if (kb.kind !== 'material') { sendJson(res, 403, { ok: false, error: '产出库只读' }); return }
+                const tbody = JSON.parse((await readBody(req)) || '{}')
+                let tr = null
+                if (rest === '/trash/restore') tr = core.restoreTrash(kb.root, trashDirOf(kb.id), tbody.entry)
+                else if (rest === '/trash/purge') tr = core.purgeTrash(trashDirOf(kb.id), tbody.entry)
+                else if (rest === '/trash/purge-all') tr = core.purgeAllTrash(trashDirOf(kb.id))
+                if (!tr) { sendJson(res, 404, { ok: false, error: 'no such trash action' }); return }
+                logger.info('dsh-kb: [' + kb.id + '] ' + rest + ' → ' + JSON.stringify(tr))
+                sendJson(res, 200, { ok: true, kb: kb.id, ...tr })
                 return
               }
               // ── 版本历史（wiki/ 快照，读任意库；恢复仅素材库） ──

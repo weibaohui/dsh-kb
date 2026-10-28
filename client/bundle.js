@@ -86,6 +86,37 @@ window.__ModuleLoader__.load({
       docAtAgent: '@ 给 agent',
       editSchemaTitle: '编辑本库的加工约定（每库独立）',
       editSchemaBtn: '✏️ 编辑约定',
+      editDocTitle: '编辑这篇正文（保存即写盘，自动进版本历史）',
+      editDocBtn: '✏️ 编辑',
+      docEditHintBold: '直接改 Markdown 正文。',
+      docEditHint: '保存写入 wiki/，宿主监视会自动存一份版本快照（每页保留 50 份），改坏可回滚。',
+      docSavedHint: '✓ 已保存',
+      docSaveFail: '保存失败：',
+      docDirtyConfirm: '有未保存的改动，确定放弃？',
+      delDocBtn: '🗑 删除',
+      delDocTitle: '把本页移进回收站（可还原；index/log/schema 不开放删除）',
+      delConfirmAria: '确认删除',
+      delConfirmHead: '删除「{name}」？',
+      delConfirmHint: '文件移进回收站，随时可还原；wiki 版本快照不受影响，历史页仍可恢复旧版。/vol1 镜像每 30 分钟同步一次删除结果。',
+      delRefsHead: '这些页面还在引用它（删前先看一眼）：',
+      delRefsLoading: '正在查还有哪些页面引用它…',
+      delRefsNone: '没查到别的页面引用它 ✓',
+      delGoBtn: '移入回收站',
+      deletedHint: '🗑 已移入回收站（左栏「回收站」可还原）',
+      delFail: '删除失败：',
+      trashBtn: '回收站',
+      trashPath: '回收站 · {n} 项（软删除，可还原）',
+      trashEmpty: '回收站是空的。',
+      trashRestoreBtn: '还原',
+      trashPurgeBtn: '彻底删除',
+      trashPurgeAllBtn: '清空回收站',
+      trashRestoredHint: '✓ 已还原 {rel}',
+      trashPurgedHint: '已彻底删除 {rel}',
+      trashPurgedAllHint: '已清空回收站（{n} 项）',
+      trashPurgeConfirm: '确定彻底删除「{name}」？此操作不可撤销。',
+      trashPurgeAllConfirm: '确定彻底删除回收站里的全部 {n} 项？不可撤销（wiki 版本快照另计）。',
+      trashFailHint: '回收站操作失败：',
+      trashBack: '← 回目录',
       historyBtn: '🕐 历史',
       historyTitle: '查看本页的修改历史,可恢复旧版本',
       feedbackBtn: '⚠️ 反馈',
@@ -283,6 +314,37 @@ window.__ModuleLoader__.load({
       docAtAgent: '@ to agent',
       editSchemaTitle: 'Edit this library\'s processing rules (per library)',
       editSchemaBtn: '✏️ Edit rules',
+      editDocTitle: 'Edit this page (saves to disk; a revision snapshot is kept)',
+      editDocBtn: '✏️ Edit',
+      docEditHintBold: 'Edit the Markdown source directly. ',
+      docEditHint: 'Saving writes into wiki/; the host watcher keeps a revision snapshot (50 per page) so you can roll back.',
+      docSavedHint: '✓ Saved',
+      docSaveFail: 'Save failed: ',
+      docDirtyConfirm: 'You have unsaved changes. Discard them?',
+      delDocBtn: '🗑 Delete',
+      delDocTitle: 'Move this page to the trash (restorable; index/log/schema cannot be deleted)',
+      delConfirmAria: 'Confirm delete',
+      delConfirmHead: 'Delete “{name}”?',
+      delConfirmHint: 'The file goes to the trash and can be restored; wiki revision snapshots stay intact. The /vol1 mirror syncs deletions every 30 minutes.',
+      delRefsHead: 'Still referenced by:',
+      delRefsLoading: 'Checking references…',
+      delRefsNone: 'No other page references it ✓',
+      delGoBtn: 'Move to trash',
+      deletedHint: '🗑 Moved to trash (restore from the sidebar)',
+      delFail: 'Delete failed: ',
+      trashBtn: 'Trash',
+      trashPath: 'Trash · {n} item(s) (soft delete, restorable)',
+      trashEmpty: 'Trash is empty.',
+      trashRestoreBtn: 'Restore',
+      trashPurgeBtn: 'Delete forever',
+      trashPurgeAllBtn: 'Empty trash',
+      trashRestoredHint: '✓ Restored {rel}',
+      trashPurgedHint: 'Deleted forever: {rel}',
+      trashPurgedAllHint: 'Trash emptied ({n} items)',
+      trashPurgeConfirm: 'Delete “{name}” forever? This cannot be undone.',
+      trashPurgeAllConfirm: 'Empty the trash ({n} items) forever? This cannot be undone.',
+      trashFailHint: 'Trash action failed: ',
+      trashBack: '← Back',
       historyBtn: '🕐 History',
       historyTitle: 'View this page\'s revision history; restore older versions',
       feedbackBtn: '⚠️ Feedback',
@@ -939,6 +1001,7 @@ window.__ModuleLoader__.load({
       const { rel, root, onNav, onAt, reloadTick, kb } = props
       const [state, setState] = React.useState({ status: 'loading' })
       const [fb, setFb] = React.useState(null) // null | {note, ask} 反馈对话框
+      const [del, setDel] = React.useState(null) // null | { refs: null | string[] }
 
       React.useEffect(() => {
         let alive = true
@@ -958,6 +1021,16 @@ window.__ModuleLoader__.load({
       const inWiki = rel === 'wiki' || rel.startsWith('wiki/')
       const isMd = doc.kind === 'md'
       const dirOf = rel.indexOf('/') >= 0 ? rel.slice(0, rel.lastIndexOf('/')) : ''
+
+      const stemOf = (p) => (p.indexOf('/') >= 0 ? p.slice(p.lastIndexOf('/') + 1) : p)
+      const openDel = async () => {
+        setDel({ refs: null })
+        try {
+          const d = await readJson(await fetch(`${API}/search?q=${encodeURIComponent(stemOf(rel))}&kb=${encodeURIComponent(kb || 'main')}`))
+          const hits = (d.hits || []).map((x) => x.rel || x.path || '').filter((x) => x && x !== rel)
+          setDel({ refs: Array.from(new Set(hits)) })
+        } catch (e) { setDel({ refs: [] }) }
+      }
 
       // 陈旧提示：frontmatter updated（缺省退回文件 mtime）超过 90 天
       const staleDays = (() => {
@@ -980,6 +1053,8 @@ window.__ModuleLoader__.load({
           h('span', { className: 'kb-docpath', title: rel }, rel + (doc.size != null ? ' · ' + fmtSize(doc.size) : '') + (doc.mtime ? ' · ' + fmtTime(doc.mtime) : '')),
           h('button', { className: 'kb-btn', onClick: () => onAt(rel) }, tt('docAtAgent')),
           rel === 'schema.md' && props.onEditSchema ? h('button', { className: 'kb-btn', title: tt('editSchemaTitle'), onClick: props.onEditSchema }, tt('editSchemaBtn')) : null,
+          inWiki && isMd && props.onEdit ? h('button', { className: 'kb-btn', title: tt('editDocTitle'), onClick: () => props.onEdit(rel) }, tt('editDocBtn')) : null,
+          (inWiki || inRaw) && props.onDelete ? h('button', { className: 'kb-btn danger', title: tt('delDocTitle'), onClick: openDel }, tt('delDocBtn')) : null,
           inWiki && isMd ? h('button', { className: 'kb-btn', title: tt('historyTitle'), onClick: () => onNav({ kind: 'history', rel }) }, tt('historyBtn')) : null,
           isMd && props.onFeedback ? h('button', { className: 'kb-btn', title: tt('feedbackTitle'), onClick: () => setFb({ note: '', ask: true }) }, tt('feedbackBtn')) : null,
           doc.kind !== 'binary' ? h('a', { className: 'kb-btn', style: { textDecoration: 'none' }, href: apiFile(rel, true), title: tt('downloadTitle') }, tt('downloadBtn')) : null,
@@ -987,6 +1062,22 @@ window.__ModuleLoader__.load({
           inRaw ? h('label', { className: 'kb-btn', style: { cursor: 'pointer' }, title: tt('uploadToTitle', { dir: dirOf || 'raw' }) },
             tt('uploadMaterial'), h('input', { type: 'file', multiple: true, className: 'kb-file', onChange: (e) => props.onUpload(dirOf || 'raw', e.target.files), key: 'up' + rel + String(props.uploadTick || 0) }),
           ) : null,
+        ),
+        del && h('div', { className: 'kb-modal-mask', onMouseDown: (e) => { if (e.target === e.currentTarget) setDel(null) } },
+          h('div', { className: 'kb-modal', role: 'dialog', 'aria-label': tt('delConfirmAria') },
+            h('p', { className: 'kb-modal-h' }, tt('delConfirmHead', { name: rel })),
+            h('p', { className: 'kb-modal-note' }, tt('delConfirmHint')),
+            del.refs === null ? h('p', { className: 'kb-modal-note' }, tt('delRefsLoading'))
+              : del.refs.length === 0 ? h('p', { className: 'kb-modal-note' }, tt('delRefsNone'))
+                : h('div', { className: 'kb-modal-note' },
+                  h('p', null, tt('delRefsHead')),
+                  h('ul', { style: { margin: '2px 0 4px 18px', padding: 0 } }, del.refs.slice(0, 8).map((x, i) => h('li', { key: i }, x))),
+                  del.refs.length > 8 ? h('span', null, '… 共 ' + del.refs.length + ' 处命中') : null),
+            h('div', { className: 'kb-modal-acts' },
+              h('button', { className: 'kb-btn', onClick: () => setDel(null) }, tt('cancel')),
+              h('button', { className: 'kb-btn danger', onClick: () => { const r = rel; setDel(null); if (props.onDelete) props.onDelete(r) } }, tt('delGoBtn')),
+            ),
+          ),
         ),
         // 反馈对话框
         fb && h('div', { className: 'kb-modal-mask', onMouseDown: (e) => { if (e.target === e.currentTarget) setFb(null) } },
@@ -1077,6 +1168,124 @@ window.__ModuleLoader__.load({
             }
           },
         }),
+      )
+    }
+
+    /**
+     * 右栏：wiki 正文编辑器——人工直接改 Markdown 正文。
+     * 保存走 PUT /doc 写入 wiki/（服务端白名单），宿主监视随后自动存版本快照。
+     */
+    function DocEditor(props) {
+      const h = React.createElement
+      const tt = useT()
+      const { rel, kb, onDone, onHint, onSaved } = props
+      const [state, setState] = React.useState({ status: 'loading' })
+
+      React.useEffect(() => {
+        let alive = true
+        setState({ status: 'loading' })
+        fetch(API + '/file?path=' + encodeURIComponent(rel) + '&kb=' + encodeURIComponent(kb || 'main'))
+          .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text() })
+          .then((text) => { if (alive) setState({ status: 'ok', text, dirty: false }) })
+          .catch((e) => { if (alive) setState({ status: 'error', message: String((e && e.message) || e) }) })
+        return () => { alive = false }
+      }, [kb, rel])
+
+      const save = async () => {
+        try {
+          await readJson(await fetch(API + '/doc?kb=' + encodeURIComponent(kb || 'main'), {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ path: rel, text: state.text }),
+          }))
+          setState((s) => ({ ...s, dirty: false }))
+          onHint(tt('docSavedHint'))
+          if (onSaved) onSaved()
+          if (onDone) onDone()
+        } catch (e) { onHint(tt('docSaveFail') + ((e && e.message) || e)) }
+      }
+
+      if (state.status === 'loading') return h('div', { className: 'kb-spin' }, tt('loading'))
+      if (state.status === 'error') return h('div', { className: 'kb-err' }, tt('readFail') + state.message)
+      return h('div', { className: 'kb-schema' },
+        h('div', { className: 'kb-docbar' },
+          h('span', { className: 'kb-docpath', title: rel }, rel),
+          h('button', { className: 'kb-btn', onClick: () => { if (!state.dirty || window.confirm(tt('docDirtyConfirm'))) onDone() } }, tt('cancel')),
+          h('button', { className: 'kb-btn primary', disabled: !state.dirty, title: '⌘S / Ctrl+S', onClick: save }, tt('save')),
+        ),
+        h('p', { className: 'kb-schema-hint' }, h('b', null, tt('docEditHintBold')), tt('docEditHint')),
+        h('textarea', {
+          className: 'kb-schema-ta', value: state.text, spellCheck: false, style: { minHeight: '58vh' },
+          onChange: (e) => setState((s) => ({ ...s, text: e.target.value, dirty: true })),
+          onKeyDown: (e) => {
+            if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S') && !(e.isComposing === true)) {
+              e.preventDefault()
+              if (state.dirty) save()
+            }
+          },
+        }),
+      )
+    }
+    /**
+     * 右栏：回收站（软删除列表 → 还原 / 彻底删除 / 清空）。
+     * 条目文件名编码了原相对路径，还原时写回原位并归一化属组权限（root:1001 / 664）。
+     */
+    function TrashView(props) {
+      const h = React.createElement
+      const tt = useT()
+      const { kb, onNav, onHint, onChanged } = props
+      const [state, setState] = React.useState({ status: 'loading', items: [] })
+
+      const load = React.useCallback(() => {
+        setState((s) => ({ ...s, status: 'loading' }))
+        fetch(`${API}/trash?kb=${encodeURIComponent(kb || 'main')}`)
+          .then(readJson)
+          .then((d) => setState({ status: 'ok', items: d.items || [] }))
+          .catch((e) => setState({ status: 'error', message: String((e && e.message) || e) }))
+      }, [kb])
+      React.useEffect(() => { load() }, [load])
+
+      const act = async (kind, it) => {
+        if (kind === 'purge' && !window.confirm(tt('trashPurgeConfirm', { name: it.rel }))) return
+        try {
+          await readJson(await fetch(`${API}/trash/${kind}?kb=${encodeURIComponent(kb || 'main')}`, {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ entry: it.entry }),
+          }))
+          onHint(kind === 'restore' ? tt('trashRestoredHint', { rel: it.rel }) : tt('trashPurgedHint', { rel: it.rel }))
+          if (onChanged) onChanged()
+          load()
+        } catch (e) { onHint(tt('trashFailHint') + ((e && e.message) || e)) }
+      }
+
+      const purgeAll = async () => {
+        if (!window.confirm(tt('trashPurgeAllConfirm', { n: state.items.length }))) return
+        try {
+          await readJson(await fetch(`${API}/trash/purge-all?kb=${encodeURIComponent(kb || 'main')}`, {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+          }))
+          onHint(tt('trashPurgedAllHint', { n: state.items.length }))
+          if (onChanged) onChanged()
+          load()
+        } catch (e) { onHint(tt('trashFailHint') + ((e && e.message) || e)) }
+      }
+
+      if (state.status === 'loading') return h('div', { className: 'kb-spin' }, tt('loading'))
+      if (state.status === 'error') return h('div', { className: 'kb-err' }, tt('readFail') + state.message)
+      return h('div', { className: 'kb-md', style: { maxWidth: 900 } },
+        h('div', { className: 'kb-docbar' },
+          h('span', { className: 'kb-docpath' }, tt('trashPath', { n: state.items.length })),
+          h('button', { className: 'kb-btn', onClick: () => onNav({ kind: 'doc', rel: 'index.md' }) }, tt('trashBack')),
+          h('button', { className: 'kb-btn', onClick: load }, tt('refresh')),
+          state.items.length ? h('button', { className: 'kb-btn danger', onClick: purgeAll }, tt('trashPurgeAllBtn')) : null,
+        ),
+        state.items.length === 0 ? h('div', { className: 'kb-empty' }, tt('trashEmpty')) : null,
+        state.items.map((it) => h('div', { key: it.entry, className: 'kb-docbar' },
+          h('span', { className: 'kb-docpath', title: it.entry }, it.rel),
+          h('span', { className: 'kb-chip' }, it.deletedAt ? it.deletedAt.replace(/T/, ' ') : ''),
+          h('span', { className: 'kb-chip' }, fmtSize(it.size)),
+          h('button', { className: 'kb-btn', onClick: () => act('restore', it) }, tt('trashRestoreBtn')),
+          h('button', { className: 'kb-btn danger', onClick: () => act('purge', it) }, tt('trashPurgeBtn')),
+        )),
       )
     }
 
@@ -2064,6 +2273,15 @@ window.__ModuleLoader__.load({
         if (n.kind === 'search') setQuery(n.q)
       }
 
+      const delDoc = async (rel) => {
+        try {
+          await readJson(await fetch(`${API}/doc?path=${encodeURIComponent(rel)}&kb=${encodeURIComponent(kbId || 'main')}`, { method: 'DELETE' }))
+          showHint(tt('deletedHint'))
+          setReloadTick((tk) => tk + 1)
+          setNav({ kind: 'doc', rel: 'index.md' })
+        } catch (e) { showHint(tt('delFail') + ((e && e.message) || e)) }
+      }
+
       const quick = (rel, label, icon) => h('button', { className: 'kb-item', 'data-cur': nav.kind === 'doc' && nav.rel === rel, onClick: () => onNav({ kind: 'doc', rel }) },
         h('span', null, icon), h('span', { className: 'nm' }, label))
 
@@ -2127,19 +2345,29 @@ window.__ModuleLoader__.load({
               quick('index.md', tt('quickIndex'), '📖'),
               quick('log.md', tt('quickLog'), '🧾'),
               quick('schema.md', tt('quickSchema'), '📐'),
+              h('button', { className: 'kb-item', 'data-cur': nav.kind === 'trash', onClick: () => onNav({ kind: 'trash' }) },
+                h('span', null, '🗑'), h('span', { className: 'nm' }, tt('trashBtn'))),
               h(TreeSection, { rootRel: 'wiki', label: tt('treeWiki'), kb: kbId, cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, reloadTick }),
               h(TreeSection, { rootRel: 'raw', label: tt('treeRaw'), kb: kbId, cur: nav.kind === 'doc' ? nav.rel : '', onOpen: (rel) => onNav({ kind: 'doc', rel }), onAt: atRel, onUpload: upload, reloadTick }),
             ),
             h('div', { className: 'kb-main' },
               error && h('div', { className: 'kb-err' }, error),
-              !error && nav.kind === 'doc' && h(DocView, { rel: nav.rel, root: status && status.root, kb: kbId, onNav, onAt: atRel, onUpload: upload, reloadTick, uploadTick, onFeedback: submitFeedback, onEditSchema: nav.rel === 'schema.md' ? () => onNav({ kind: 'schema-edit' }) : null }),
+              !error && nav.kind === 'doc' && h(DocView, { rel: nav.rel, root: status && status.root, kb: kbId, onNav, onAt: atRel, onUpload: upload, reloadTick, uploadTick, onFeedback: submitFeedback, onEditSchema: nav.rel === 'schema.md' ? () => onNav({ kind: 'schema-edit' }) : null, onEdit: (rel) => onNav({ kind: 'doc-edit', rel }), onDelete: delDoc }),
               !error && nav.kind === 'history' && h(HistoryView, { rel: nav.rel, kb: kbId, onNav, onHint: showHint, onRestored: () => setReloadTick((tk) => tk + 1) }),
               !error && nav.kind === 'schema-edit' && h(SchemaEditor, {
                 kb: kbId, kbName: curKb && curKb.name, onHint: showHint,
                 onDone: () => onNav({ kind: 'doc', rel: 'schema.md' }),
                 onSaved: () => setReloadTick((tk) => tk + 1),
               }),
-              !error && nav.kind === 'search' && h(SearchView, { q: nav.q, kb: kbId, onNav, onAt: atRel }),
+              !error && nav.kind === 'doc-edit' && h(DocEditor, {
+                rel: nav.rel, kb: kbId, onHint: showHint,
+                onDone: () => onNav({ kind: 'doc', rel: nav.rel }),
+                onSaved: () => setReloadTick((tk) => tk + 1),
+              }),
+
+              !error && nav.kind === 'trash' && h(TrashView, {
+                kb: kbId, onNav, onHint: showHint, onChanged: () => setReloadTick((tk) => tk + 1),
+              }),          !error && nav.kind === 'search' && h(SearchView, { q: nav.q, kb: kbId, onNav, onAt: atRel }),
               !error && nav.kind === 'queue' && h(QueueView, { data: queueData, kbs, onToggleDistill: toggleDistill, onAction: queueAction, onNav, onHint: showHint }),
             ),
           ),
