@@ -150,6 +150,103 @@ function listDir(root, rel) {
   return entries
 }
 
+// ── 编码探测（dsh-kb#3 缺陷1）：raw 素材常见 GBK/UTF-16（Windows 记事本/导出件），
+// 按 utf8 硬解全是 U+FFFD 乱码，agent 读到乱码必然空手而归。只用 Node 内置
+// TextDecoder（WHATWG 编码表），零依赖。
+// 探测阶梯：BOM → 无 BOM UTF-16（头部 NUL 占比启发 + 可打印比择优 LE/BE）
+// → 严格 UTF-8 → 严格 gb18030 → 宽容 gb18030（U+FFFD ≤5%）→ 有损 UTF-8 兜底。
+// 已知残留：纯 CJK、不含任何 ASCII 字节、无 BOM 的 UTF-16（NUL 启发不触发）以及
+// 无 BOM 的西文 UTF-16BE（LE 侧解出常见汉字块）无法与 gb18030/LE 可靠区分——
+// Windows 生态的实际文件（记事本/PowerShell 导出）几乎都带 BOM，可正常识别。
+const DECODE_PROBE_BYTES = 256 * 1024
+
+/** 有损解码质量：U+FFFD 占比（按 UTF-16 码元计，每个坏序列恰好产出一个码元）。 */
+function replacementRatio(text) {
+  if (!text.length) return 0
+  let bad = 0
+  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 0xfffd) bad++
+  return bad / text.length
+}
+
+/** 严格解码：null=有非法字节（该档不适用），undefined=编码名不受支持（ICU 缺失，跳档）。 */
+function tryStrict(label, buf) {
+  let dec
+  try { dec = new TextDecoder(label, { fatal: true }) } catch { return undefined }
+  try { return dec.decode(buf) } catch { return null }
+}
+
+/** 文本可信度：ASCII 可打印/空白 + CJK 统一表意 + 中日标点 + 全角形式 + 拉丁补充占比较高算可信。 */
+function plausibleRatio(text) {
+  if (!text.length) return 0
+  let ok = 0
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i)
+    if ((c >= 0x20 && c < 0x7f) || c === 9 || c === 10 || c === 13) ok++
+    else if (c >= 0x4e00 && c <= 0x9fff) ok++
+    else if (c >= 0x3000 && c <= 0x303f) ok++
+    else if (c >= 0xff00 && c <= 0xffef) ok++
+    else if (c >= 0xa0 && c < 0x100) ok++
+  }
+  return ok / text.length
+}
+
+/** 无 BOM UTF-16 的 LE/BE 择优：各自解头部按可信度评分，同分/过低保守判负（回落后续阶梯）。 */
+function detectUtf16NoBom(head) {
+  const le = head.toString('utf16le')
+  const beBuf = Buffer.from(head)
+  beBuf.swap16()
+  const be = beBuf.toString('utf16le')
+  const sLe = plausibleRatio(le)
+  const sBe = plausibleRatio(be)
+  if (sLe >= 0.8 && sLe >= sBe) return 'utf-16le'
+  if (sBe >= 0.8) return 'utf-16be'
+  return null
+}
+
+/**
+ * 编码探测解码：Buffer → { encoding, text }（text 一律是 JS UTF-16 串，落盘/检索/展示通用）。
+ * 探测只看头部（DECODE_PROBE_BYTES），认定编码后全量解。
+ */
+function decodeText(buf) {
+  if (!Buffer.isBuffer(buf)) buf = Buffer.from(String(buf || ''), 'utf8')
+  if (!buf.length) return { encoding: 'utf-8', text: '' }
+  // ① BOM：三种头部标志，各按自身编码解（剔除 BOM 本体）
+  if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return { encoding: 'utf-8', text: buf.subarray(3).toString('utf8') }
+  if (buf[0] === 0xff && buf[1] === 0xfe) return { encoding: 'utf-16le', text: buf.subarray(2).toString('utf16le') }
+  if (buf[0] === 0xfe && buf[1] === 0xff) {
+    const body = buf.subarray(2)
+    const even = Buffer.from(body.length % 2 ? body.subarray(0, body.length - 1) : body)
+    even.swap16()
+    return { encoding: 'utf-16be', text: even.toString('utf16le') }
+  }
+  // ② 无 BOM UTF-16：偶数长度 + 头部 NUL 字节占比 ≥5%（UTF-16 编码的 ASCII/换行高字节恒为 0）
+  if (buf.length % 2 === 0) {
+    const head = buf.subarray(0, Math.min(buf.length, DECODE_PROBE_BYTES))
+    let nul = 0
+    for (let i = 0; i < head.length; i++) if (head[i] === 0) nul++
+    if (nul / head.length >= 0.05) {
+      const enc = detectUtf16NoBom(head)
+      if (enc) {
+        let bytes = buf
+        if (enc === 'utf-16be') { bytes = Buffer.from(buf); bytes.swap16() }
+        return { encoding: enc, text: bytes.toString('utf16le') }
+      }
+    }
+  }
+  // ③ 严格 UTF-8：UTF-8 中文字节序列不可能是合法 GBK 二字序列，先判 UTF-8 无歧义
+  const strictUtf8 = tryStrict('utf-8', buf)
+  if (strictUtf8 != null) return { encoding: 'utf-8', text: strictUtf8 }
+  // ④ gb18030（GBK/GB2312/CP936 的超集）：先严格；宽容档容忍零星坏字节（截断处/混杂字节）
+  const strictGbk = tryStrict('gb18030', buf)
+  if (strictGbk != null) return { encoding: 'gb18030', text: strictGbk }
+  try {
+    const lossyGbk = new TextDecoder('gb18030').decode(buf)
+    if (replacementRatio(lossyGbk) <= 0.05) return { encoding: 'gb18030', text: lossyGbk }
+  } catch { /* ICU 缺失：跳过 gb18030 档 */ }
+  // ⑤ 兜底：有损 UTF-8（v0.7.18 及以前对所有文件的唯一行为）
+  return { encoding: 'utf-8', text: buf.toString('utf8') }
+}
+
 /** 极简 frontmatter 解析：key: value / key: [a, b] / 引号字符串。 */
 function parseFrontmatter(text) {
   const src = String(text || '')
@@ -182,7 +279,7 @@ function readDoc(root, rel) {
   const ext = path.extname(abs).slice(1).toLowerCase()
   const base = { rel: path.relative(ensureRoot(root), abs).split(path.sep).join('/'), name: path.basename(abs), size: st.size, mtime: Math.round(st.mtimeMs), ext }
   if (TEXT_EXT.has(ext) && st.size <= MAX_DOC_BYTES) {
-    const text = fs.readFileSync(abs, 'utf8')
+    const text = decodeText(fs.readFileSync(abs)).text // GBK/UTF-16 素材先探测转码，不再硬解 utf8（dsh-kb#3）
     if (ext === 'md' || ext === 'markdown') {
       const { data, body } = parseFrontmatter(text)
       return { ...base, kind: 'md', frontmatter: data, body }
@@ -262,7 +359,7 @@ function search(root, query) {
     const ext = path.extname(abs).slice(1).toLowerCase()
     if (!TEXT_EXT.has(ext)) continue
     let text
-    try { text = fs.readFileSync(abs, 'utf8') } catch { continue }
+    try { text = decodeText(fs.readFileSync(abs)).text } catch { continue }
     scanned++
     const lines = text.split(/\r?\n/)
     const rel = path.relative(rootAbs, abs).split(path.sep).join('/')
@@ -624,7 +721,7 @@ function snapWikiTree(rootAbs, histKbDir) {
     let text
     try {
       if (fs.statSync(abs).size > SNAP_MAX_BYTES) continue
-      text = fs.readFileSync(abs, 'utf8')
+      text = decodeText(fs.readFileSync(abs)).text
     } catch { continue }
     const dir = snapDirFor(histKbDir, rel)
     try {
@@ -773,7 +870,7 @@ module.exports = {
   TEXT_EXT, walkFiles,
   REGISTRY_VERSION, loadKbRegistry, saveKbRegistry, newKbId, normalizeKbRoot, kbRootsOverlap,
   ensureRoot, resolveExisting, resolveCreatable, lexicalAbs, cleanSegment,
-  listDir, parseFrontmatter, readDoc, sendFile, search, uploadRaw,
+  listDir, parseFrontmatter, readDoc, sendFile, search, uploadRaw, decodeText,
   readSchema, writeSchema, writeDoc,
   trashDoc, listTrash, restoreTrash, purgeTrash, purgeAllTrash,
   safeWikiRel, snapWikiTree, listSnapshots, readSnapshot, restoreSnapshot, appendFeedback,

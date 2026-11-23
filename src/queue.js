@@ -16,6 +16,8 @@
  *  - 去重：同 rel 且同 hash 且已有非终态或 done 记录 → 跳过；hash 变化 → 素材更新，重新入队。
  *  - 台账丢失恢复：wiki 各篇 frontmatter sources 已引用的 raw 文件不再入队（v0 每日任务思路）。
  *  - 产出验证双路：runner 回传的 pages ∪ 会话前后 wiki/ diff，都为空 → failed(no output)。
+ *  - 编码探测（dsh-kb#3）：GBK/UTF-16 素材先转码出 UTF-8 副本（chunks/ 台账区），agent 读
+ *    副本不读 raw 原件；0 工具调用的 no-output 单独给「上下文超限/preset 过重」诊断。
  */
 
 const fs = require('node:fs')
@@ -31,7 +33,7 @@ const WIKI_PREFIX = core.WIKI_DIR + '/'
 const RAW_PREFIX = core.RAW_DIR + '/'
 const CHUNK_THRESHOLD = 100 * 1024    // 超过此大小的素材自动分片（单回合吞不下整本书）
 const CHUNK_TARGET = 32 * 1024        // 单片目标大小
-const CHUNK_MAX_ITEMS = 50            // 分片数上限（超出则单片变大）
+const CHUNK_MAX_ITEMS = 200           // 分片数上限（超出则单片变大；dsh-kb#3：50 会把 3.7MB 书合并出 64K 字符的巨片）
 
 /** 执行器不可用（agents 服务缺失/模型未配置）：不计失败次数，条目保持 queued。 */
 class ExecutorUnavailableError extends Error {}
@@ -120,7 +122,7 @@ function extractJsonTail(text) {
 }
 
 /**
- * 自动蒸馏设置补丁白名单清洗：只收六个已知键并夹取范围。
+ * 自动蒸馏设置补丁白名单清洗：只收七个已知键并夹取范围。
  */
 function sanitizeAutoPatch(body) {
   const out = {}
@@ -128,6 +130,7 @@ function sanitizeAutoPatch(body) {
   if (typeof b.enabled === 'boolean') out.enabled = b.enabled
   if (typeof b.provider === 'string') out.provider = b.provider.trim().slice(0, 120)
   if (typeof b.model === 'string') out.model = b.model.trim().slice(0, 160)
+  if (typeof b.preset === 'string') out.preset = b.preset.trim().slice(0, 120)
   const num = (v, lo, hi) => {
     const n = Number(v)
     return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : undefined
@@ -156,8 +159,10 @@ function resolveRouteOverride(provider, model) {
 /** 蒸馏 prompt（自包含，不依赖会话上下文；规则与 schema.md 一致）。 */
 function buildDistillPrompt(item, rootAbs) {
   const head = item.chunk
-    ? `素材：${item.rel} 的第 ${item.chunk.idx}/${item.chunk.total} 片，本片内容在文件：${item.chunk.file}（只加工本片；其余片由其他会话处理）`
-    : `素材：${item.rel}`
+    ? `素材：${item.rel} 的第 ${item.chunk.idx}/${item.chunk.total} 片，本片内容在文件：${item.chunk.file}（只加工本片；其余片由其他会话处理）。不要读 ${item.rel} 原文件（整读会被截断或乱码）；页面 frontmatter 的 sources 仍引用 ${item.rel}`
+    : item.derived
+      ? `素材：${item.rel}（${item.derived.encoding} 编码），已转码出 UTF-8 副本在文件：${item.derived.file}。加工请读该副本，不要读原文件（原文件整读会乱码）；页面 frontmatter 的 sources 仍引用 ${item.rel}`
+      : `素材：${item.rel}`
   return [
     '你是 dsh-kb 的自动加工 bot（author 固定写 kb-bot）。知识库根目录下的素材需要你按知识库约定加工成文。',
     `知识库根目录：${rootAbs || '(未知)'}`,
@@ -333,21 +338,45 @@ function createQueue({ root, rootOf, ledgerFile, runner, logger = { info() {}, w
       startedAt: null, finishedAt: null, sessionId: null, pages: [], note: '', error: null,
     }
     if (extra && extra.chunk) item.chunk = extra.chunk
+    if (extra && extra.derived) item.derived = extra.derived
     items.push(item)
     return item
   }
 
   const chunksDir = path.join(path.dirname(ledgerFile), 'chunks')
 
-  /** 超大素材分片落盘（分片文件放插件台账区，不进知识库根），并逐片入队。返回入队条数。 */
+  const ENC_PROBE_BYTES = 256 * 1024
+
+  /**
+   * 超大素材分片 / 非 UTF-8 素材转码副本落盘（放插件台账区，不进知识库根），并逐片入队。
+   * 编码探测只看头部（dsh-kb#3 缺陷1）：GBK/UTF-16 素材按 utf8 硬解是乱码，agent 读到必空手而归——
+   * 先转码出 UTF-8 副本让 agent 读副本，raw/ 原件一字节不动（不可变约定）。返回入队条数。
+   */
   function admit(rel, fp, kbId) {
     const kbRoot = rootFor(kbId)
     const abs = path.join(kbRoot, ...rel.split('/'))
     const ext = path.extname(abs).slice(1).toLowerCase()
-    if (fp.size <= CHUNK_THRESHOLD || !core.TEXT_EXT.has(ext)) return addItem(rel, fp, null, kbId) && 1
+    if (!core.TEXT_EXT.has(ext)) return addItem(rel, fp, null, kbId) && 1
+    let enc = 'utf-8'
+    try {
+      const fd = fs.openSync(abs, 'r')
+      try {
+        const head = Buffer.alloc(Math.min(fp.size, ENC_PROBE_BYTES))
+        fs.readSync(fd, head, 0, head.length, 0)
+        enc = core.decodeText(head).encoding
+      } finally { fs.closeSync(fd) }
+    } catch { /* 探测失败：按 utf-8 走老路 */ }
+    const big = fp.size > CHUNK_THRESHOLD
+    if (enc === 'utf-8' && !big) return addItem(rel, fp, null, kbId) && 1
+    // 走到这说明要么超大（要分片）要么非 UTF-8（要转码副本）：全量读 + 解码
     let text
-    try { text = fs.readFileSync(abs, 'utf8') } catch { return addItem(rel, fp, null, kbId) && 1 }
-    const parts = splitMarkdown(text)
+    let decoded = 'utf-8'
+    try {
+      const d = core.decodeText(fs.readFileSync(abs))
+      text = d.text
+      decoded = d.encoding
+    } catch { return addItem(rel, fp, null, kbId) && 1 }
+    const parts = big ? splitMarkdown(text) : null
     const relHash = crypto.createHash('sha256').update(kbId + '|' + rel).digest('hex').slice(0, 8)
     const kbChunks = path.join(chunksDir, kbId || 'main')
     const dirName = relHash + '-' + fp.hash.slice(7, 15)
@@ -358,6 +387,13 @@ function createQueue({ root, rootOf, ledgerFile, runner, logger = { info() {}, w
         if (d.startsWith(relHash + '-') && d !== dirName) fs.rmSync(path.join(kbChunks, d), { recursive: true, force: true })
       }
       fs.mkdirSync(dir, { recursive: true })
+      if (!parts) {
+        // 小而非 UTF-8：单文件转码副本，agent 读副本（页面 sources 仍引 raw 原件）
+        const file = path.join(dir, 'derived.md')
+        fs.writeFileSync(file, text, 'utf8')
+        addItem(rel, fp, { derived: { file, encoding: decoded } }, kbId)
+        return 1
+      }
       const width = String(parts.length).length
       parts.forEach((p, i) => {
         const file = path.join(dir, String(i + 1).padStart(width, '0') + '.md')
@@ -365,7 +401,7 @@ function createQueue({ root, rootOf, ledgerFile, runner, logger = { info() {}, w
         addItem(rel, fp, { chunk: { idx: i + 1, total: parts.length, file } }, kbId)
       })
     } catch (e) {
-      logger.warn(`dsh-kb: 分片落盘失败，整文件入队：${(e && e.message) || e}`)
+      logger.warn(`dsh-kb: 分片/转码落盘失败，整文件入队：${(e && e.message) || e}`)
       return addItem(rel, fp, null, kbId) && 1
     }
     return parts.length
@@ -572,7 +608,13 @@ function createQueue({ root, rootOf, ledgerFile, runner, logger = { info() {}, w
     for (const rel of diffPages) if (!pages.includes(rel)) pages.push(rel)
 
     if (!pages.length) {
-      finalizeFailure(item, 'no output detected（无 JSON 结论且 wiki 无变更）' + (res.diag ? `；diag: ${res.diag}` : ''), lim)
+      // dsh-kb#3：0 工具调用与「无产出」分开报——多半是模型上下文超限/预设工具头过重，
+      // 蒸馏 prompt 被上游截断（模型只回句问候语），与素材无关，先修配置再重试
+      const zeroTool = res.toolCalls === 0
+        ? '；全程 0 次工具调用——多半是模型上下文超限或预设工具头过重，蒸馏 prompt 被上游截断'
+          + '（检查蒸馏模型的上下文窗口配置，或在设置里改用精简预设），与素材无关'
+        : ''
+      finalizeFailure(item, 'no output detected（无 JSON 结论且 wiki 无变更）' + zeroTool + (res.diag ? `；diag: ${res.diag}` : ''), lim)
       return 'failed'
     }
     item.status = 'done'; item.finishedAt = nowIso()

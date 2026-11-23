@@ -471,3 +471,115 @@ test('多知识库：scan(kbId) 只扫指定库', async (t) => {
   assert.strictEqual(items.length, 1)
   assert.strictEqual(items[0].kbId, 'kbB')
 })
+
+// ── dsh-kb#3 缺陷1：编码探测与转码副本 ──────────────────────
+
+const GBK_ZHONGWEN = Buffer.from([0xD6, 0xD0, 0xCE, 0xC4]) // 中文
+
+/** 按原始字节写 raw 素材（writeRaw 只收 utf8 字符串，GBK/UTF-16 样本要用字节写）。 */
+function writeRawBytes(root, name, buf) {
+  const abs = path.join(root, 'raw', name)
+  fs.mkdirSync(path.dirname(abs), { recursive: true })
+  fs.writeFileSync(abs, buf)
+  return 'raw/' + name
+}
+
+test('admit：小 GBK 素材转码出 derived 副本，prompt 指向副本并禁读原件', async (t) => {
+  const { root, ledgerFile } = sandbox(t)
+  const { runner } = swappableRunner(async () => ({}))
+  const q = makeQueue({ root, ledgerFile, runner, getLimits: () => ({ timeoutMs: 5000, maxAttempts: 1 }) })
+  q.setPaused(true)
+  const rel = writeRawBytes(root, 'gbk-note.txt', Buffer.concat([GBK_ZHONGWEN, Buffer.from(' note\r\n', 'latin1')]))
+  const r = q.offer(rel)
+  assert.strictEqual(r.ok, true)
+  const it = q.snapshot().items.find((x) => x.rel === rel)
+  assert.ok(it.derived, '非 UTF-8 小文件应有 derived 副本')
+  assert.strictEqual(it.derived.encoding, 'gb18030')
+  assert.strictEqual(fs.readFileSync(it.derived.file, 'utf8'), '中文 note\r\n', '副本应是无乱码 UTF-8')
+  assert.ok(!it.chunk, '小文件不分片')
+  const prompt = q.buildPrompt(it)
+  assert.ok(prompt.includes(it.derived.file), 'prompt 应指向副本')
+  assert.ok(prompt.includes('不要读'), 'prompt 应禁止读 raw 原件')
+})
+
+test('admit：大 GBK 素材分片，片内无乱码（先转码再切）', async (t) => {
+  const { root, ledgerFile } = sandbox(t)
+  const { runner } = swappableRunner(async () => ({}))
+  const q = makeQueue({ root, ledgerFile, runner, getLimits: () => ({ timeoutMs: 5000, maxAttempts: 1 }) })
+  q.setPaused(true)
+  const parts = []
+  for (let i = 0; i < 12000; i++) parts.push(GBK_ZHONGWEN, Buffer.from(` line ${i}\n`, 'latin1'))
+  const buf = Buffer.concat(parts) // ≈170KB > 100KB 阈值
+  const rel = writeRawBytes(root, 'gbk-book.txt', buf)
+  const r = q.offer(rel)
+  assert.strictEqual(r.ok, true)
+  const chunks = q.snapshot().items.filter((x) => x.chunk)
+  assert.ok(chunks.length >= 2, `大 GBK 应分片（实际 ${chunks.length} 片）`)
+  for (const c of chunks) {
+    const text = fs.readFileSync(c.chunk.file, 'utf8')
+    assert.ok(!text.includes('\uFFFD'), '每片都应无替换符')
+    assert.ok(text.includes('中文'), '每片应含正确解码的中文')
+    assert.ok(c.chunk.file.endsWith('.md'))
+  }
+  assert.strictEqual(new Set(chunks.map((c) => c.chunk.idx)).size, chunks.length, '片序号不重复')
+})
+
+test('admit：超大节分片 >50 片不再被合并（CHUNK_MAX_ITEMS=200）', async (t) => {
+  const { root, ledgerFile } = sandbox(t)
+  const { runner } = swappableRunner(async () => ({}))
+  const q = makeQueue({ root, ledgerFile, runner, getLimits: () => ({ timeoutMs: 5000, maxAttempts: 1 }) })
+  q.setPaused(true)
+  // splitMarkdown 的标题打包会把小节合成 ~32KB 片（设计如此）；要触发 >50 片，
+  // 每节得超过目标大小走硬切：60 节 × 40KB ≈ 2.4MB，每节硬切 2 片 = 120 片
+  const sections = []
+  for (let i = 0; i < 60; i++) sections.push(`## sec ${i}\n\n${'x'.repeat(40000)}\n`)
+  const rel = writeRaw(root, 'many-sections.md', sections.join('\n'))
+  q.offer(rel)
+  const chunks = q.snapshot().items.filter((x) => x.chunk)
+  assert.ok(chunks.length > 50, `应得 120 片左右（实际 ${chunks.length}；旧上限 50 会合并成 ≤50 片）`)
+  for (const c of chunks) assert.ok(fs.readFileSync(c.chunk.file, 'utf8').length <= 41 * 1024, '单片 ≤ 40KB 行对齐余量内')
+})
+
+// ── dsh-kb#3 缺陷2：0 工具调用的 no-output 归因诊断 ──────────
+
+test('no-output 且 toolCalls=0：错误信息含上下文超限/预设过重诊断', async (t) => {
+  const { root, ledgerFile } = sandbox(t)
+  const { runner } = swappableRunner(async () => ({ tail: '你好！我准备好了。', toolCalls: 0 }))
+  const q = makeQueue({ root, ledgerFile, runner, getLimits: () => ({ timeoutMs: 5000, maxAttempts: 1 }) })
+  const rel = writeRaw(root, 'zero-tool.md', '# t\ncontent')
+  q.offer(rel)
+  await until(() => q.snapshot().stats.failed === 1, 4000, 'failed')
+  const it = q.snapshot().items.find((x) => x.rel === rel)
+  assert.strictEqual(it.status, 'failed')
+  assert.ok(it.error.includes('no output detected'))
+  assert.ok(it.error.includes('0 次工具调用'), '应单独报 0 工具调用')
+  assert.ok(it.error.includes('上下文超限'), '应指向上下文/预设配置修复')
+})
+
+test('no-output 且有工具调用：不误报上下文超限', async (t) => {
+  const { root, ledgerFile } = sandbox(t)
+  const { runner } = swappableRunner(async () => ({ tail: '读了一堆但没写', toolCalls: 5 }))
+  const q = makeQueue({ root, ledgerFile, runner, getLimits: () => ({ timeoutMs: 5000, maxAttempts: 1 }) })
+  const rel = writeRaw(root, 'some-tool.md', '# t\ncontent')
+  q.offer(rel)
+  await until(() => q.snapshot().stats.failed === 1, 4000, 'failed')
+  const it = q.snapshot().items.find((x) => x.rel === rel)
+  assert.ok(it.error.includes('no output detected'))
+  assert.ok(!it.error.includes('0 次工具调用'), '有工具调用不给 0 工具诊断')
+})
+
+test('runner 回传 tail JSON + toolCalls：正常 done 路径不受影响', async (t) => {
+  const { root, ledgerFile } = sandbox(t)
+  const { runner } = swappableRunner(async () => {
+    writeWiki(root, 'wiki/howtos/a.md', '成文')
+    return { tail: '{"pages": ["wiki/howtos/a.md"], "summary": "ok"}', toolCalls: 3 }
+  })
+  const q = makeQueue({ root, ledgerFile, runner, getLimits: () => ({ timeoutMs: 5000, maxAttempts: 1 }) })
+  const rel = writeRaw(root, 'json-tail.md', '# t\ncontent')
+  q.offer(rel)
+  await until(() => q.snapshot().stats.done === 1, 4000, 'done')
+  const it = q.snapshot().items.find((x) => x.rel === rel)
+  assert.strictEqual(it.status, 'done')
+  assert.deepStrictEqual(it.pages, ['wiki/howtos/a.md'])
+  assert.strictEqual(it.note, 'ok')
+})

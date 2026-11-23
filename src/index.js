@@ -34,7 +34,7 @@ const name = 'dsh-kb'
 const inject = ['webServer', 'agents', 'agentDefaultModel', 'sessions', 'settings', 'llm', 'connection']
 const API_PREFIX = '/dsh-kb/api'
 
-const DEFAULT_AUTO = { enabled: true, provider: '', model: '', timeoutMin: 20, maxAttempts: 2, sweepSec: 60 }
+const DEFAULT_AUTO = { enabled: true, provider: '', model: '', preset: '', timeoutMin: 20, maxAttempts: 2, sweepSec: 60 }
 
 /** dsh 数据根（与宿主一致：$DSH_HOME，缺省 ~/.dsh）。 */
 function dshHome() {
@@ -61,6 +61,7 @@ function autoSettingsSchema() {
     enabled: Schema.boolean(),
     provider: Schema.string(),
     model: Schema.string(),
+    preset: Schema.string(),
     timeoutMin: Schema.number(),
     maxAttempts: Schema.number(),
     sweepSec: Schema.number(),
@@ -117,6 +118,8 @@ function debounce(fn, ms) {
   }
 }
 
+const nap = (ms) => new Promise((r) => setTimeout(r, ms))
+
 /**
  * agent 会话执行器：一个条目一个新会话（kit runShareInProcess 形状）。
  * 返回 { tail }（模型可见回复全文，供 JSON 尾协议解析）；pages 由队列统一验证。
@@ -148,10 +151,15 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
         // 关键：meta.agentPreset 只是会话头标签，不带任何工具——没有 preset mount
         // 的会话一个工具都没有，模型只能干说「我无法执行命令」（真机抓过）。
         // 必须在 setup 里 mount 部署默认预设，和 web 网关/dsh-tasks 同款（dsh-tasks 原注释）。
+        // 设置里指定 preset（如精简预设）优先；未知/失败回退部署默认（dsh-kb#3：默认预设
+        // 535 个工具 572KB 头，小窗口模型会把蒸馏 prompt 挤出上下文）。
         setup: async (agentCtx) => {
           const presets = typeof ctx.get === 'function' ? ctx.get('agentPresets') : undefined
           if (!presets || typeof presets.resolve !== 'function' || typeof presets.mount !== 'function') return
-          const resolved = await presets.resolve(undefined)
+          let resolved = null
+          const want = String(cfg.preset || '').trim()
+          if (want) { try { resolved = await presets.resolve(want) } catch { resolved = null } }
+          if (!resolved || !resolved.id) { try { resolved = await presets.resolve(undefined) } catch { resolved = null } }
           if (resolved && resolved.id) await presets.mount(agentCtx, resolved.id)
         },
       })
@@ -187,6 +195,7 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
     } catch (e) { logger.warn(`dsh-kb: [${item.id}] 权限旋钮失败：${(e && e.message) || e}`) }
     let output = ''
     let finalText = ''
+    let toolCalls = 0
     const seen = new Set()
     const eventList = () => {
       // 0.1.5 起移除 events 属性（snapshotEvents() 取代），旧宿主仍是数组属性；异常兜底空数组
@@ -198,7 +207,8 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
       } catch { return [] }
     }
     // 事件泵：text-delta 增量（block-assembler 形状）；'text' 整块为旧形状兜底；
-    // assistant/message 记录最终可见全文（JSON 尾协议从这里取，防流式输出被截断）。
+    // assistant/message 记录最终可见全文（JSON 尾协议从这里取，防流式输出被截断）；
+    // tool/ 前缀事件计数（dsh-kb#3：全程 0 次 = 上下文超限/preset 过重被截断的指纹）。
     const pump = () => {
       for (const ev of eventList()) {
         if (ev.seq < firstSeq || seen.has(ev.seq)) continue
@@ -212,6 +222,8 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
             .map((b) => b.text)
             .join('')
           if (text.trim() !== '') finalText = text
+        } else if (typeof ev.type === 'string' && ev.type.startsWith('tool/')) {
+          toolCalls++
         }
       }
     }
@@ -246,6 +258,18 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
       })
       logger.info(`dsh-kb: [${item.id}] followup 已发，等 whenIdle…`)
       await agent.whenIdle()
+      // dsh-kb#3 缺陷3：whenIdle 返回时末批事件可能尚未入列（96 个会话全部 out=0B fin=0B 的
+      // 根因——返回值早于 finally 补泵求值，JSON 尾协议永远拿到空串）。补泵后等事件流静止
+      // （连续 3 拍无新事件，5s 封顶）再求 diag/tail，返回值绝不早于最后一次 pump。
+      pump()
+      let prevCount = eventList().length
+      let quiet = 0
+      for (let i = 0; i < 20 && quiet < 3; i++) {
+        await nap(250)
+        pump()
+        const n = eventList().length
+        if (n > prevCount) { prevCount = n; quiet = 0 } else quiet++
+      }
       // 诊断信息随返回值走（插件 logger 不落盘；无产出时队列把它写进 item.error）
       const list = eventList()
       const counts = {}
@@ -256,13 +280,13 @@ function createAgentRunner({ ctx, rootAbs, readAuto, logger }) {
       for (const ev of list) {
         if (ev.type === 'assistant/chunk' && ev.data && ev.data.chunk) chunkTypes[ev.data.chunk.type] = (chunkTypes[ev.data.chunk.type] || 0) + 1
       }
-      const diag = `ev=${list.length} [${hist}] chunks=${JSON.stringify(chunkTypes)} last=${last} out=${output.length}B fin=${finalText.length}B`
+      const diag = `ev=${list.length} [${hist}] chunks=${JSON.stringify(chunkTypes)} last=${last} out=${output.length}B fin=${finalText.length}B tools=${toolCalls}`
         + `\nSAMPLE text-delta: ${samples.chunkText[0] || '-'}`
         + `\nSAMPLE message: ${samples.message[0] || '-'}`
         + `\nSAMPLE tool: ${samples.tool[0] || '-'}`
       logger.info(`dsh-kb: [${item.id}] whenIdle 结束：${diag}`)
       try { await ctx.sessions.flush(agent.session) } catch { /* 可选服务 */ }
-      return { tail: finalText || output, diag }
+      return { tail: finalText || output, toolCalls, diag }
     } finally {
       clearInterval(timer)
       clearInterval(sampleTimer)
@@ -325,7 +349,10 @@ function createFeedbackWorker({ ctx, readAuto, logger }) {
         setup: async (agentCtx) => {
           const presets = typeof ctx.get === 'function' ? ctx.get('agentPresets') : undefined
           if (!presets || typeof presets.resolve !== 'function' || typeof presets.mount !== 'function') return
-          const resolved = await presets.resolve(undefined)
+          const want = String(readAuto().preset || '').trim()
+          let resolved = null
+          if (want) { try { resolved = await presets.resolve(want) } catch { resolved = null } }
+          if (!resolved || !resolved.id) { try { resolved = await presets.resolve(undefined) } catch { resolved = null } }
           if (resolved && resolved.id) await presets.mount(agentCtx, resolved.id)
         },
       })
@@ -405,6 +432,7 @@ module.exports = {
   inject,
   version: core.VERSION,
   Config,
+  createAgentRunner,
 
   apply(ctx, config = {}) {
     const logger = ctx.logger || { info() {}, warn() {}, error() {} }
